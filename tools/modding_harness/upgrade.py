@@ -280,6 +280,9 @@ def stage_review_bundle(root, source, destination, candidate, previous=None, *, 
     deadline = time.monotonic() + 60 if deadline is None else deadline
     root, source = Path(root).resolve(), Path(source).resolve()
     destination = Path(destination).absolute()
+    # The parent in its real spelling, as every path under it is checked later; the name is not followed, so a link there
+    # is still refused below.
+    destination = destination.parent.resolve() / destination.name
     if (not source.is_dir() or reserve < 0 or contains(root, destination) or contains(source, destination)
             or contains(destination, root) or contains(destination, source)):
         raise ValueError("review bundle must be separate from installed and candidate roots")

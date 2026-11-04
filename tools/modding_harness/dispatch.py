@@ -128,7 +128,11 @@ class Dispatcher:
                                          len(keys)) for g in grants):
                         missing.append(approval.example(action.session_id, operation, members,
                                        action.command, bound, len(keys)))
-                if not operations or missing:
+                if not operations:
+                    return Outcome(Result("deny", "evaluated", "required", reason=
+                        "this wildcard matches no existing save, so there is nothing to approve: check the pattern, "
+                        "or name the saves"))
+                if missing:
                     return Outcome(Result("deny", "evaluated", "required", reason=
                         "typed canonical human approval required: " + (why or "scope mismatch") + "\n" + "\n".join(missing)))
             if not groups:

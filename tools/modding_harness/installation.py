@@ -106,7 +106,7 @@ def handle(args, root, *, local_files=(), review_builder=None, candidate_prepare
 
 def failure(command, exc, label):
     from .contracts import Result
-    status = (1 if isinstance(exc, UpgradeFailed) else 2) if command in ("upgrade-stage", "upgrade-apply", "upgrade-rollback") else 0
+    status = (1 if isinstance(exc, UpgradeFailed) else 2) if command in ("upgrade-preview", "upgrade-stage", "upgrade-apply", "upgrade-rollback") else 0
     reason = label + ": " + (str(exc) if command in ("upgrade-apply", "upgrade-rollback") else type(exc).__name__)
     return {"api_version": 1, "result": Result("deny", "failed", reason=reason).as_dict(), "transactions": []}, status
 

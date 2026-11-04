@@ -4,13 +4,16 @@
 # This script is designed to be run FROM your Skyrim folder, after
 # extracting the toolkit zip into it. It configures everything in-place.
 #
-# Usage: bash setup.sh [--agent claude|codex|all|auto|generic|opencode] [--lock]
+# Usage: bash setup.sh [--agent claude|codex|all|auto|generic|opencode] [--lock] [--save-lock|--no-save-lock]
 #   --agent auto    (the default) every agent found on PATH; when none is found, all of them
 #   --agent claude  Claude Code only      --agent codex  Codex only (Windows only)
 #   --agent all     every named adapter (`both` is accepted as another name for it)
 #   --agent generic portable instructions only; --agent opencode OpenCode V1 plugin files
 #   --lock          also apply the Layer 2 read-only lock to the vanilla masters and archives.
 #                   OFF unless you pass it (bash tools/skyguard.sh lock unlock <file> lifts it again).
+#   --save-lock     lock the saves so no agent or script can delete or change them (Windows only; unlocking
+#                   one needs an administrator prompt). Asked interactively when neither flag is given;
+#                   --no-save-lock skips the question. OFF unless chosen.
 # Setup never installs software. Every install command it prints is for you to run.
 
 set -e
@@ -18,7 +21,7 @@ set -e
 # --- Options: checked before anything is written ----------------------------------------------------------
 # An unknown option or --agent value is a usage error (exit 2) and nothing is touched.
 usage() {
-    echo "usage: bash setup.sh [--agent claude|codex|all|auto|generic|opencode] [--lock]"
+    echo "usage: bash setup.sh [--agent claude|codex|all|auto|generic|opencode] [--lock] [--save-lock|--no-save-lock]"
     echo "  --agent auto    the default: every agent found on PATH (claude, codex); all of them when none is found"
     echo "  --agent claude  configure Claude Code only"
     echo "  --agent codex   configure Codex only (Windows only)"
@@ -26,9 +29,12 @@ usage() {
     echo "  --agent opencode configure the OpenCode V1 CLI target (running-host blocking unqualified)"
     echo "  --agent all     configure both (\`both\` means the same)"
     echo "  --lock          also lock the vanilla masters and archives read-only (off unless you ask)"
+    echo "  --save-lock     lock the saves against any delete or change (Windows; asked when neither flag is given)"
+    echo "  --no-save-lock  leave save locking off without asking"
 }
 AGENT_ARG="auto"
 WANT_LOCK=""
+WANT_SAVE_LOCK=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --agent)
@@ -38,6 +44,8 @@ while [ $# -gt 0 ]; do
             AGENT_ARG="$2"; shift 2 ;;
         --agent=*) AGENT_ARG="${1#--agent=}"; shift ;;
         --lock) WANT_LOCK=1; shift ;;
+        --save-lock) WANT_SAVE_LOCK=yes; shift ;;
+        --no-save-lock) WANT_SAVE_LOCK=no; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "setup.sh: unknown option '$1'. Nothing was changed." >&2; usage >&2; exit 2 ;;
     esac
@@ -654,6 +662,7 @@ HOOKS_MISSING=0
 # hooks; the .ps1 as $PY = '...' with PowerShell's own quote escaping (PY_PS above).
 for hook in .claude/hooks/protect-bash.sh .claude/hooks/protect-files.sh .claude/hooks/protect-mcp.sh \
             .claude/hooks/backup-before-edit.sh .claude/hooks/snapshot-before-tool.sh .claude/hooks/session-kb-guard.sh \
+            .claude/hooks/save-sentinel.sh \
             .codex/hooks/skyguard-entry.ps1 .codex/hooks/skyguard-entry.sh; do
     case "$hook" in
         *.ps1) H_SED="$PY_PS_SED"; H_LINE="\$PY = '$PY_PS'"; H_RE='^[$]PY = '; H_NEW="\$PY = '$PY_PS_SED'" ;;
@@ -1165,6 +1174,45 @@ else
     echo "Layer 2 lock: OFF (the default). bash setup.sh --lock makes the vanilla masters and archives read-only."
 fi
 
+# --- Optional save locks (user ruling 2026-10-31): the OS refuses to delete or change a locked save ---
+# Off unless chosen. Asked only when a person is at the terminal on Windows and neither flag was given; Enter = no.
+SAVE_LOCK_RC=""
+SAVE_LOCK_SWITCH="$GAME_DIR/.modding-agent-harness/save-lock.json"
+echo ""
+case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) SL_WINDOWS=1 ;; *) SL_WINDOWS="" ;; esac
+if [ -f "$SAVE_LOCK_SWITCH" ] && grep -q '"enabled": true' "$SAVE_LOCK_SWITCH" 2>/dev/null; then
+    echo "Save locks: ON (already). Only an elevated prompt switches them off: bash tools/skyguard.sh save-lock off"
+elif [ -z "$SL_WINDOWS" ]; then
+    if [ "$WANT_SAVE_LOCK" = yes ]; then
+        echo "  !! --save-lock: save locks need Windows (NTFS). Not applied."
+        SAVE_LOCK_RC=3
+    fi
+else
+    if [ -z "$WANT_SAVE_LOCK" ] && [ -t 0 ]; then
+        echo "Save locks (optional, recommended): Windows itself refuses to delete or change your saves, so no agent,"
+        echo "script or tool can damage one. New saves, autosaves and quicksaves still work; saving over an old save"
+        echo "from the game menu leaves the old one in place. Unlocking a save later needs an administrator prompt."
+        echo "The locks outlast the toolkit: before removing it, run bash tools/skyguard.sh save-lock off (as admin)."
+        read -r -p "Lock your saves? (y/N) " SL_ANSWER || SL_ANSWER=""
+        case "$SL_ANSWER" in y|Y|yes|YES|Yes) WANT_SAVE_LOCK=yes ;; *) WANT_SAVE_LOCK=no ;; esac
+    fi
+    if [ "$WANT_SAVE_LOCK" = yes ]; then
+        if [ -z "$PY_FOUND" ]; then
+            SAVE_LOCK_RC=2
+            echo "  !! SAVE LOCKS NOT APPLIED: they need Python 3.10+. Install it and re-run: bash setup.sh --save-lock"
+        else
+            echo "Locking the saves (a few minutes for thousands of saves)..."
+            MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B "$PY_ROOT/tools/skyguard" save-lock on \
+                --project "$PY_ROOT" && SAVE_LOCK_RC=0 || SAVE_LOCK_RC=$?
+            if [ "$SAVE_LOCK_RC" != 0 ]; then
+                echo "  !! SAVE LOCKS NOT (fully) APPLIED (exit $SAVE_LOCK_RC, above). Check: bash tools/skyguard.sh save-lock status"
+            fi
+        fi
+    else
+        echo "Save locks: OFF. bash tools/skyguard.sh save-lock on (or bash setup.sh --save-lock) switches them on."
+    fi
+fi
+
 # --- Which agent ends up configured, said plainly ---
 CLAUDE_STATE="not configured"
 if [ -f "$GAME_DIR/CLAUDE.md" ] && ! grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/CLAUDE.md"; then CLAUDE_STATE="configured"; fi
@@ -1213,6 +1261,7 @@ echo "  .claude/hooks/protect-mcp.sh     -- Guards DevBench (smp reset denied, v
 echo "  .claude/hooks/backup-before-edit.sh -- Auto-backups (Edit/Write/NotebookEdit) with audit trail"
 echo "  .claude/hooks/snapshot-before-tool.sh -- Snapshots .psc/.pex before non-read-only shell commands"
 echo "  .claude/hooks/session-kb-guard.sh -- Snapshots KNOWLEDGEBASE/CLAUDE.md/AGENTS.md once per session"
+echo "  .claude/hooks/save-sentinel.sh   -- After each call: reports saves changed with no backup first"
 echo "  tools/                           -- Helper scripts (AutoMod wrapper, esp-verify, NIF tools, nexus.sh, resaver-cli.sh)"
 echo "  .claude/backups/                 -- Backup storage"
 echo ""
@@ -1307,6 +1356,9 @@ if [ -n "$PATHS_BAD" ]; then
     SETUP_RC=1
 fi
 if [ -n "$WANT_LOCK" ] && [ "$LOCK_RC" != 0 ]; then
+    SETUP_RC=1
+fi
+if [ "$WANT_SAVE_LOCK" = yes ] && [ -n "$SAVE_LOCK_RC" ] && [ "$SAVE_LOCK_RC" != 0 ]; then
     SETUP_RC=1
 fi
 exit "$SETUP_RC"

@@ -31,7 +31,7 @@ def test_backslash_python_path_reaches_hooks_intact(game_dir):
     assert result.returncode == 0, f"setup.sh failed:\n{result.stdout}\n{result.stderr}"
 
     lines = hook_python_lines(game_dir)
-    assert len(lines) == 6, f"setup.sh configured {sorted(lines)}, expected all six hooks"
+    assert len(lines) == 7, f"setup.sh configured {sorted(lines)}, expected all seven hooks"
 
     for hook, line in lines.items():
         assert "{{PYTHON_PATH}}" not in line, f"{hook}: placeholder was never substituted"
@@ -52,7 +52,7 @@ def test_the_real_interpreter_is_what_gets_written(game_dir):
     result = run_setup(game_dir)
     assert result.returncode == 0, f"setup.sh failed:\n{result.stdout}\n{result.stderr}"
     lines = hook_python_lines(game_dir)
-    assert len(lines) == 6
+    assert len(lines) == 7
     for hook, line in lines.items():
         path = line[len("PY='"):-1]
         assert "{{" not in path and "\\" not in path, f"{hook}: {line}"
@@ -68,7 +68,7 @@ def test_a_path_containing_an_ampersand_is_not_mangled_by_sed(game_dir):
     result = run_setup(game_dir, env_overrides={"FAKE_PYTHON_EXE": path}, shim_path=True)
     assert result.returncode == 0, result.stderr
     lines = hook_python_lines(game_dir)
-    assert len(lines) == 6
+    assert len(lines) == 7
     for hook, line in lines.items():
         assert line == f"PY='{path}'", f"{hook}: {line}"
 
@@ -142,7 +142,7 @@ def test_a_path_with_shell_metacharacters_reaches_the_hook_verbatim(game_dir):
     result = run_setup(game_dir, env_overrides={"FAKE_PYTHON_EXE": path}, shim_path=True)
     assert result.returncode == 0, result.stderr
     lines = hook_python_lines(game_dir)
-    assert len(lines) == 6   # Plan 5 Task 11 added protect-mcp.sh
+    assert len(lines) == 7   # Plan 5 Task 11 added protect-mcp.sh; 2026-10-30 save-sentinel.sh
     for hook, line in lines.items():
         assert line == f"PY='{path}'", f"{hook}: {line}"
         assert _eval_py_line(line) == path, f"{hook}: bash expanded the path"
@@ -153,7 +153,7 @@ def test_a_path_with_a_single_quote_survives_the_quoting(game_dir):
     result = run_setup(game_dir, env_overrides={"FAKE_PYTHON_EXE": path}, shim_path=True)
     assert result.returncode == 0, result.stderr
     lines = hook_python_lines(game_dir)
-    assert len(lines) == 6
+    assert len(lines) == 7
     for hook, line in lines.items():
         assert _eval_py_line(line) == path, f"{hook}: {line}"
     # re-running with the same interpreter changes nothing (the comparison knows the quoted form)

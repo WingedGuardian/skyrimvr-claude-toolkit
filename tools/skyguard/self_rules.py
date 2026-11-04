@@ -182,10 +182,26 @@ def save_store_target(abs_path, roots, holder=False, cache=None):
             or holder and (not rel or rel in _SAVE_HOLDERS))
 
 
-def shell_save_store_hit(command, parsed, roots, cwd="", env=None):
+SAVE_LOCK_SWITCH = [".modding-agent-harness", "save-lock.json"]
+
+
+def save_lock_target(abs_path, roots, holder=False, cache=None):
+    """The optional save-lock switch (user ruling 2026-10-31: only the user turns locking off). Its folder is a
+    save-store holder already, so moving or deleting that is S-SAVE-STORE's."""
+    rel = _rel(abs_path, roots.install_dirs) if roots is not None and abs_path else None
+    return rel is not None and [p.lower() for p in rel] == SAVE_LOCK_SWITCH
+
+
+def shell_save_lock_hit(command, parsed, roots, cwd="", env=None):
+    """A recognized write, move or delete of the save-lock switch."""
+    return shell_save_store_hit(command, parsed, roots, cwd, env, target=save_lock_target)
+
+
+def shell_save_store_hit(command, parsed, roots, cwd="", env=None, target=None):
     """Recognized store mutations, including an ancestor moved/deleted or aliased."""
     from . import deletes
     env = os.environ if env is None else env
+    target = target or save_store_target
     cache = _StoreCache()
     for e in parsed.execs:
         e = deletes.substituted(e)
@@ -193,7 +209,7 @@ def shell_save_store_hit(command, parsed, roots, cwd="", env=None):
         candidates += [(w, True) for w in (deletes.operands(e) or []) if isinstance(w, str)]
         for word, holder in candidates:
             placed = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), word)
-            if placed and save_store_target(placed, roots, holder, cache):
+            if placed and target(placed, roots, holder, cache):
                 return placed
     for word, how in deletes.recycle_targets(deletes.recycle_text(command, parsed)):
         # A concatenation hole can look like an empty quoted argument. It is
@@ -201,7 +217,7 @@ def shell_save_store_hit(command, parsed, roots, cwd="", env=None):
         if not word.strip():
             continue
         placed = _recycle_abs(word, how, targets.normalise_cwd(cwd), env)
-        if placed and save_store_target(placed, roots, True, cache):
+        if placed and target(placed, roots, True, cache):
             return placed
     return ""
 

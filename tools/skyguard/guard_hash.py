@@ -40,6 +40,7 @@ CONFIGURED = {
     ".claude/hooks/backup-before-edit.sh": (SH_PY,),
     ".claude/hooks/snapshot-before-tool.sh": (SH_PY,),
     ".claude/hooks/session-kb-guard.sh": (SH_PY,),
+    ".claude/hooks/save-sentinel.sh": (SH_PY,),
     ".codex/hooks/skyguard-entry.ps1": (PS_PY, PS_BASH),
     ".codex/hooks/skyguard-entry.sh": (SH_PY, SH_BASH),
 }
