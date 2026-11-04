@@ -149,3 +149,10 @@ beating a rival LOCALAPPDATA list, and each explicit override beating that. The 
 configuration is covered by `tests/test_setup_paths.py::test_setup_writes_the_mo2_roots_the_guard_reads`
 (setup records the MO2 `mods` and `overwrite` roots, read back as data the way the guard reads them).
 This section only records the behavior those tests pin.
+
+## Runtime-test support ownership (promotion proposal)
+
+Reusable lifecycle/reference/readiness support belongs in the toolkit; consumer-specific
+profiles and unrelated diagnostic experiments remain isolated. The capability gap and
+required review/test gates are recorded in the [gateway consumer handoff](superpowers/handoffs/gateway-runtime-support.md).
+This is a proposal, not an implemented API, host upgrade or launch authorization.
