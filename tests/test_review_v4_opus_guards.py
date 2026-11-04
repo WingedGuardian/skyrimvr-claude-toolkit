@@ -88,6 +88,20 @@ def test_a_tree_into_the_settings_folder_needs_the_saves_approval(world, command
     assert judge(world, command, shell, "C:/Temp")[1] == {"S-SAVE-APPROVAL"}
 
 
+@pytest.mark.parametrize("command, shell", [
+    ('cp -r bk/Saves "<C>/"', "bash"), ('tar -xf p.tar -C "<C>"', "bash"), ('rsync -a bk/ "<C>/"', "bash"),
+    ('Expand-Archive x.zip -DestinationPath "<C>"', "powershell"),
+    ("python -c \"import shutil; shutil.copytree('bk', r'<C>', dirs_exist_ok=True)\"", "bash"),
+])
+def test_a_tree_into_a_settings_folder_with_no_saves_needs_no_approval(tmp_path, command, shell):
+    """Nothing is at risk, and no typed line could approve a wildcard that matches nothing."""
+    install, config = (tmp_path / "Game").as_posix(), (tmp_path / "Docs/My Games/Skyrim VR").as_posix()
+    os.makedirs(install + "/Data")
+    os.makedirs(config + "/Saves")
+    roots = paths.roots(install, "", {"SKYRIM_GAME_ROOT": install, "SKYRIM_CONFIG_DIR": config})
+    assert judge((install, config, roots), command, shell, "C:/Temp")[0] == "allow"
+
+
 @pytest.mark.parametrize("command", ['cp Skyrim.ini "<C>/"', 'cp a.ini "<C>/SkyrimPrefs.ini"'])
 def test_a_named_settings_file_is_not_a_bulk_save_change(world, command):
     assert not judge(world, command, "bash", "C:/Temp")[2]

@@ -204,10 +204,11 @@ def test_a_malformed_mo2_path_stops_the_install_rather_than_writing_to_data(tmp_
 
 
 # ---- 2.18
-def test_a_mod_folder_kept_as_a_backup_cannot_turn_staging_cleanup_off(tmp_path):
+def test_a_mod_folder_kept_as_a_backup_cannot_turn_staging_cleanup_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("SKYRIM_MANUAL_INSTALLS", str(tmp_path))
     kept = tmp_path / "backups" / "x" / "mod-folder"
     kept.mkdir(parents=True)
     (kept / "manifest.json").write_text(json.dumps({"a": 1}), encoding="utf-8")
     (kept / "other.json").write_bytes(b"\xff\xfe not utf-8")
     hk = load("housekeep_opus", "tools/housekeep.py")
-    assert hk.manifest_references(tmp_path) is not None
+    assert hk.manifest_references({"root": str(tmp_path)}) is not None    # a mod's own manifest.json raised here

@@ -748,6 +748,20 @@ def is_settings_folder(abs_path: Optional[str], roots) -> bool:
     return _rel(abs_path, roots.config_dirs) == [] or bool(re.search(r"/my games/skyrim[^/]*$", abs_path.rstrip("/").lower()))
 
 
+def _settings_hold_saves(physical: str) -> bool:
+    """Is there a save for a tree restored into this settings folder to replace? With none, nothing is at risk, and a
+    wildcard approval could name nothing to approve. A folder that cannot be listed counts as holding some."""
+    if not physical:
+        return True
+    try:
+        names = os.listdir(physical.rstrip("/\\") + "/Saves")
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return any(n.lower().endswith(SAVE_EXTS) for n in names)
+
+
 def _may_bring_saves(source: str) -> bool:
     """A copy source that can hold saves: a folder, a wildcard that could match one. A named other file cannot."""
     name = _name(source)
@@ -984,7 +998,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                                  for s in named)
                 else:
                     bulk_into_saves(dst)
-            elif is_settings_folder(a_bulk, roots):
+            elif is_settings_folder(a_bulk, roots) and _settings_hold_saves(targets.physical_operand(e, dst, cwd, env)):
                 bulk_into_saves(dst, "/Saves")
         for dst, srcs in copy_targets(e):
             # The destination as written AND where it resolves (`cp a.ini x.ini` run inside Data/SKSE/Plugins).
@@ -997,7 +1011,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                                                                  if not s.lower().endswith(SAVE_EXTS))):
                 bulk_into_saves(dst)
                 continue
-            if is_settings_folder(a_dst, roots) and any(_may_bring_saves(s) for s in srcs):
+            if is_settings_folder(a_dst, roots) and any(_may_bring_saves(s) for s in srcs) and _settings_hold_saves(
+                    targets.physical_operand(e, dst, cwd, env)):
                 bulk_into_saves(dst, "/Saves")
                 continue
             if a_dst is None and _unplaced_save(dst):
@@ -1079,7 +1094,9 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         elif copied and not word.moved and is_save_folder(a, roots) and word.source.lower().endswith(SAVE_EXTS) and not word.tree:
             physical = targets.physical(word, actual_base, "cmd", env, literal=True)
             saves.append((paths.physical_abs(physical.rstrip("/\\") + "/" + _name(word.source)) if physical else "", "write"))
-        elif copied and not word.moved and (is_save_folder(a, roots) or (word.tree and is_settings_folder(a, roots))) and (
+        elif copied and not word.moved and (is_save_folder(a, roots) or (
+                word.tree and is_settings_folder(a, roots) and _settings_hold_saves(
+                    targets.physical(word, actual_base, "cmd", env, literal=True)))) and (
                 word.tree or _may_bring_saves(word.source)):
             physical = targets.physical(word, actual_base, "cmd", env, literal=True)
             below = "/Saves" if is_settings_folder(a, roots) else ""
