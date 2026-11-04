@@ -1230,6 +1230,7 @@ def test_a_dir_the_bin_refuses_is_left_in_place_and_named(tmp_path):
     def picky(paths):
         out = {}
         for p in paths:
+            # The name only: the whole path holds a random temp folder, and "zt0wdbig" refused the twin on CI.
             out.update({str(p): "too big for the Recycle Bin"} if "big" in os.path.basename(str(p)) else fake([p]))
         return out
     res = hk.sweep_temp(sweep_cfg(), temp=temp, recycler=picky)
