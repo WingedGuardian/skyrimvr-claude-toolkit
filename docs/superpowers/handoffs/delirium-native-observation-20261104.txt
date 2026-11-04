@@ -99,3 +99,18 @@ _CLAUDE_OUTPUT/delirium-vr-assessment-20261104/PLAN.txt
 _CLAUDE_OUTPUT/delirium-vr-assessment-20261104/ROUTES.txt
 _CLAUDE_OUTPUT/delirium-vr-assessment-20261104/probe/
 These are supporting evidence and an unfinished consumer draft, not a shared API.
+
+Additional consumer of item 4: Skyrim Souls (added 2026-11-04 at the user's request)
+Souls adds no second extraction or observation capability. Checkpoint: game-root commit
+c51836bb; its native installation stays disabled (refusal 55). Requested: a read-only
+reference to an immutable Skyrim VR 1.4.15 native image, with derivation and tool
+provenance, complete source and output hashes, ownership and retention guarantees. Game
+bytes stay local, with no full image copy per consumer or run.
+Installed SkyrimVR.exe SHA256, re-measured 2026-11-04:
+6961efb4f4775a307b0fc9a3d637542c1e090be207d3b09467eab216b7f87971
+Historical derived image SHA256, hash re-measured 2026-11-04, derivation not re-run:
+28fbe6abe4c221c6c9131737fbe8b86ea81638e69f62d9fdb9cbaa653186a0ab
+Souls owns its hook sites, publication design and quiescence analysis. Development/test
+tooling only, not a runtime requirement. Authorizes no launch, deployment or save change.
+Local consumer notes (not a dependency):
+_CLAUDE_OUTPUT/skyrim-souls-vr-2026-10-24/ui-phase-qualification-20261104/TOOLKIT-INPUT-HANDOFF.md
