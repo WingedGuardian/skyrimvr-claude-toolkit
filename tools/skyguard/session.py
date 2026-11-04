@@ -39,6 +39,7 @@ def with_charter(text, project, session_id):
             extra += " " + ledger.commands(project, session_id)
         except Exception:                     # noqa: BLE001
             pass
+        return "\n".join(t for t in (extra, text) if t)    # first: an adapter's cut takes the end, and this must survive it
     return "\n".join(t for t in (text, extra) if t)
 
 

@@ -283,6 +283,9 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     lock_hit = self_rules.shell_save_lock_hit(command, parsed, roots, cwd, env)
     if lock_hit:
         return deny("S-SAVE-LOCK", os.path.basename(lock_hit.rstrip("/")) or lock_hit)
+    lock_command = lift_rules.save_lock_change(parsed)
+    if lock_command:
+        return deny("S-SAVE-LOCK", lock_command)
     # User ruling 2026-10-20: an agent session transcript (where save approvals are read) is never an agent's to change.
     spoken = self_rules.shell_transcript_hit(command, parsed, cwd, env, transcript)
     if spoken:

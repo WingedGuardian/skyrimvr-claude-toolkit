@@ -64,7 +64,10 @@ def _scan(roots, extensions, watch, limit):
             with os.scandir(root) as entries:
                 for entry in entries:
                     if _member(entry.name, extensions) and entry.is_file():
-                        add(entry.path, entry.stat())
+                        try:
+                            add(entry.path, entry.stat())
+                        except FileNotFoundError:
+                            continue    # this one went between the listing and the stat; the rest are still here
         except FileNotFoundError:
             continue                # the folder itself is gone: its saves are gone too, as far as anyone can tell
         except OSError:

@@ -108,6 +108,12 @@ def install_kind(rel: List[str]) -> str:
         return GUARD
     if rel[:3] == [".claude", "backups", ".hook-heartbeat"] or rel == [".claude", "backups", "audit_log.txt"]:
         return GUARD
+    # What the save sentinel compares with and what `save-lock off` relies on: a reset baseline hides every change.
+    if rel in ([".claude", "backups", ".save-sentinel.json"], [".claude", "backups", ".save-sentinel.json.seen"],
+               [".modding-agent-harness", "save-lock-folders.json"], [".modding-agent-harness", "save-lock-exempt.json"]):
+        return GUARD
+    if rel in (["tools", "session-charter.sh"], ["tools", "kb-guard.sh"]):   # registered hooks, outside .claude/hooks
+        return GUARD
     return ""
 
 

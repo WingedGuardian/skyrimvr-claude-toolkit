@@ -30,6 +30,9 @@ ELEVATED_REPEAT = 12 * 3600   # seconds between "this agent runs elevated" warni
 MARKED_DEPTH = 4          # <project>/<a>/<b>/<c>/.protect-saves at most
 MARKED_REFRESH = 3600     # seconds between searches for marked folders
 GAMES = ("SkyrimVR.exe", "SkyrimSE.exe", "Skyrim.exe")
+MOST_A_SESSION_CHANGES = 40   # saves one play session can plausibly change between two looks
+FAILED_REPEAT = 3600          # seconds between reports that the sentinel itself is failing
+UNLOCK_LASTS = 3600           # seconds a save the user unlocked stays unlocked, for a repair in progress
 _INI = re.compile(r"^\s*sLocalSavePath\s*=\s*(.*?)\s*$", re.I | re.M)
 SKIP = {".git", "node_modules", "__pycache__", ".claude"}
 
@@ -74,7 +77,11 @@ def save_folders(roots, env):
                     found.append(Path(value) if os.path.isabs(value) else game / value)
     unique = {}
     for f in found:
-        if f.is_dir():
+        try:
+            present = f.is_dir()
+        except OSError:                    # an sLocalSavePath under a denied folder must not stop every look
+            continue
+        if present:
             unique.setdefault(os.path.normcase(os.path.abspath(f)), f)
     return list(unique.values())
 
@@ -98,14 +105,47 @@ def marked_folders(project, depth=MARKED_DEPTH):
 
 
 def game_running():
-    if os.name != "nt":
-        return False
+    command = ["tasklist", "/NH", "/FO", "CSV"] if os.name == "nt" else ["ps", "-eo", "args"]
     try:
-        out = subprocess.run(["tasklist", "/NH", "/FO", "CSV"], capture_output=True, text=True, timeout=5,
+        out = subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=5,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout.lower()
     except (OSError, subprocess.SubprocessError):
         return False
-    return any('"' + g.lower() + '"' in out for g in GAMES)
+    return any(g.lower() in out for g in GAMES)      # off Windows the game runs under Proton: its name is in the arguments
+
+
+def session_end(save_folder, since):
+    """When the game last ran, by the logs it rewrites beside its saves, if that was since `since`; None when none shows."""
+    game = Path(save_folder).parent
+    newest = None
+    for log in list(game.glob("SKSE/*.log")) + [game / "Logs" / "Script" / "Papyrus.0.log"]:
+        try:
+            stamp = log.stat().st_mtime
+        except OSError:
+            continue
+        if stamp >= since and (newest is None or stamp > newest):
+            newest = stamp
+    return newest
+
+
+def games_doing(changes, game_folders, since):
+    """The (kind, path) changes the game itself may have made: in a folder it writes, a few at a time, and dated inside
+    the time it was running or the session that ended since the last look. A bulk change is never a play session's."""
+    running, quiet = None, []
+    counts = {}
+    for _kind, path in changes:
+        folder = os.path.normcase(os.path.abspath(os.path.dirname(path)))
+        counts[folder] = counts.get(folder, 0) + 1
+    for kind, path in changes:
+        folder = os.path.normcase(os.path.abspath(os.path.dirname(path)))
+        if folder not in game_folders or counts[folder] > MOST_A_SESSION_CHANGES:
+            continue
+        if running is None:
+            running = game_running()
+        end = None if running else session_end(os.path.dirname(path), since)
+        if (running or end is not None) and sentinel.dated_within(kind, path, since, end):
+            quiet.append((kind, path))
+    return quiet
 
 
 class _NoStore:
@@ -119,6 +159,28 @@ def state_path(project):
 def lock_switch(project):
     """The optional save-lock switch (modding_harness/save_lock.py); self_rules protects it from agent changes."""
     return Path(project) / ".modding-agent-harness" / "save-lock.json"
+
+
+def exempt_path(project):
+    """What the user unlocked by hand, and until when; the save locks leave those alone for UNLOCK_LASTS."""
+    return Path(project) / ".modding-agent-harness" / "save-lock-exempt.json"
+
+
+def record_unlocked(project, paths_, now=None):
+    now = time.time() if now is None else now
+    path = exempt_path(project)
+    rows = _exempt_rows(path, now)
+    rows.update({str(p): now + UNLOCK_LASTS for p in paths_})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rows), encoding="utf-8")
+
+
+def _exempt_rows(path, now):
+    try:
+        rows = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in rows.items() if isinstance(v, (int, float)) and v > now} if isinstance(rows, dict) else {}
 
 
 def lock_notes(project, state, before, profile, now):
@@ -140,7 +202,7 @@ def lock_notes(project, state, before, profile, now):
                                  + [os.path.dirname(p) for _, _, p in files.values()]))
     try:
         failed = save_lock.auto_lock(state, before, files, folders, now=now, extensions=profile.extensions,
-                                     config=lock_switch(project))
+                                     config=lock_switch(project), exempt=tuple(_exempt_rows(exempt_path(project), now)))
     except Exception as exc:        # noqa: BLE001 -- locks are optional; the look above must still reach the agent
         failed = ["(locking unavailable: {}: {})".format(type(exc).__name__, exc)]
     if failed:                      # the user's business, once per failure: this runs after every tool call
@@ -165,9 +227,29 @@ def lock_notes(project, state, before, profile, now):
 
 
 def report_text(project, roots, env, now=None):
-    """(text for the agent, raise to the user?) -- ('', False) when nothing changed without a backup."""
-    from . import save_store
+    """(text for the agent, raise to the user?) -- ('', False) when nothing changed without a backup. A look that fails
+    says so, once an hour: the wrapper discards a crash, and the user was told any save change is reported."""
     now = time.time() if now is None else now
+    try:
+        return _look(project, roots, env, now)
+    except Exception as exc:                           # noqa: BLE001 -- silence here would read as "nothing changed"
+        mark = state_path(project).with_name(".save-sentinel.failed")
+        try:
+            if now - mark.stat().st_mtime < FAILED_REPEAT:
+                return "", False
+        except OSError:
+            pass                                       # silent-ok: no mark yet means report it now
+        try:
+            mark.parent.mkdir(parents=True, exist_ok=True)
+            mark.write_bytes(b"")
+        except OSError:
+            pass                                       # silent-ok: this report does not depend on the mark
+        return ("SAVE SENTINEL: this look failed ({}), so changes to saves are NOT being reported right now. Run "
+                "tools/hook-canary.sh, and tell the user.".format(type(exc).__name__)), True
+
+
+def _look(project, roots, env, now):
+    from . import save_store
     path = state_path(project)
     state = sentinel.load_state(path, now=now)
     if state.get("busy"):           # the record is locked just now: nothing to compare with, and it stays the baseline
@@ -181,23 +263,36 @@ def report_text(project, roots, env, now=None):
     except (OSError, ValueError):
         store = _NoStore()        # no readable store: every change is reported, none is "covered"
     before = dict(state.get("files") or {})
+    since = state.get("time", now)
     report = sentinel.check(profile, store, state, watch=state["marked"], now=now)
     notes, lock_loud = lock_notes(project, state, before, profile, now)
+    # Everything that can fail comes before the record: written first, a failure after it lost the finding for good.
+    folders = {os.path.normcase(os.path.abspath(f)) for f in profile.save_roots}
+    quiet = games_doing(report.unbacked, folders, since)
+    raised = tuple(c for c in report.unbacked if c not in quiet)
+    # A folder that stays unreadable is said once, not after every tool call.
+    standing = sorted(report.truncated + report.unread)
+    if state.get("noted") == standing:
+        report = report._replace(truncated=(), unread=())
+    state["noted"] = standing
+    text = sentinel.describe(report._replace(unbacked=raised))
+    if raised:
+        text += ("\nThe save rules did not back these up. If a command or script you ran did this, tell the user now; "
+                 "a removed file may be in the Recycle Bin. Restore points: tools/skyguard.sh snapshot list --kind save")
+    if quiet:
+        lines = ["SAVE SENTINEL: {} save file(s) changed while the game was running or before it last exited, so it may be "
+                 "the game itself saving:".format(len(quiet))]
+        lines += ["  {}: {}".format(kind, where) for kind, where in quiet[:15]]
+        if len(quiet) > 15:
+            lines.append("  ... and {} more".format(len(quiet) - 15))
+        text = "\n".join(t for t in [text] + lines if t)
     try:
         sentinel.save_state(path, state)
     except OSError as exc:          # this look's findings still count; the old record stays the baseline, so at worst
         notes.append("SAVE SENTINEL: this look could not be recorded ({}), so the next look may repeat it."    # a repeat
                      .format(type(exc).__name__))
-    text = sentinel.describe(report)
-    loud = False
-    if report.unbacked:
-        running = game_running()
-        text += ("\nThe game is running, so it may be the game itself saving." if running else
-                 "\nThe save rules did not back these up. If a command or script you ran did this, tell the user now; "
-                 "a removed file may be in the Recycle Bin. Restore points: tools/skyguard.sh snapshot list --kind save")
-        loud = not running
     text = "\n".join([t for t in [text] + notes if t])
-    return text, loud or lock_loud or report.state_lost
+    return text, bool(raised) or lock_loud or report.state_lost
 
 
 def render(text, loud):

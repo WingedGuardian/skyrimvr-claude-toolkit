@@ -3,18 +3,23 @@
     tools/skyguard.sh save-lock status [--project P]
     tools/skyguard.sh save-lock on     [--project P]   lock every save folder now; the save sentinel then locks each
                                                        new save once it settles (a few minutes after it is written)
-    tools/skyguard.sh save-lock off    [--project P]   elevated prompt only; lifts EVERY lock (run it before you
+    tools/skyguard.sh save-lock off    [--project P] [--forget-missing]
+                                                       elevated prompt only; lifts EVERY lock (run it before you
                                                        remove the toolkit: the locks outlast it, and ordinary
-                                                       Windows tools cannot lift them)
+                                                       Windows tools cannot lift them). --forget-missing drops the
+                                                       record of a locked folder that is gone for good
     tools/skyguard.sh save-lock unlock <save.ess|folder> [--project P]
                                                        elevated prompt only; a save is backed up (with its co-save)
                                                        into the permanent store first, and nothing is unlocked if
-                                                       that backup fails
+                                                       that backup fails. It stays unlocked for an hour, then the
+                                                       sentinel locks it again
 
 While on, Windows itself refuses any delete, overwrite, rename or recycle of a locked save, from any program running
 as the user -- an agent, a script, and the game too (saving over an old slot from the menu writes a new file; the old
-one stays). Autosave and quicksave slots stay unlocked. `on` is refused from an elevated (administrator) prompt: the
-locks do not hold an agent running elevated. Windows/NTFS only.
+one stays), and a mod or console command saving to one fixed name fails once that file is locked. Autosave and
+quicksave slots stay unlocked. `on` is refused from an elevated (administrator) prompt: the locks do not hold an agent
+running elevated. Windows/NTFS only. New saves are locked by the save sentinel, a Claude Code hook: on another agent,
+only the saves present at `on` are locked. An agent's own `on`, `off` or `unlock` is refused by the guard (S-SAVE-LOCK).
 
 Exit codes (the X4 contract): 0 done, 1 partial, 2 refused or usage, 3 unsupported.
 """
@@ -53,6 +58,7 @@ def _unlock(project, target, out):
         paths = [target] + [e.path for e in os.scandir(target) if e.is_file() and save_lock.is_member(e.name, EXTS)]
         for p in paths:
             save_lock.unlock(p, sid)
+        _spare(project, [target], out)
         print("unlocked {} path(s)".format(len(paths)), file=out)
         return 0
     stem, ext = os.path.splitext(target)
@@ -71,8 +77,18 @@ def _unlock(project, target, out):
         print("backed up: " + ", ".join(ids), file=out)
 
     done = save_lock.backup_then_unlock(ess, [skse], sid, backup)
+    _spare(project, [str(p) for p in done], out)
     print("unlocked: " + ", ".join(os.path.basename(str(p)) for p in done), file=out)
     return 0
+
+
+def _spare(project, paths, out):
+    from . import save_sentinel
+    try:
+        save_sentinel.record_unlocked(project, paths)
+        print("It stays unlocked for an hour; after that the save sentinel locks it again.", file=out)
+    except OSError as e:
+        print("Could not record the unlock ({}): the save sentinel may lock it again at its next look.".format(e), file=out)
 
 
 def main(argv=None, out=None) -> int:
@@ -82,6 +98,7 @@ def main(argv=None, out=None) -> int:
     ap.add_argument("action", choices=("status", "on", "off", "unlock"))
     ap.add_argument("target", nargs="?")
     ap.add_argument("--project", default=None)
+    ap.add_argument("--forget-missing", action="store_true")
     try:
         a = ap.parse_args(argv)
     except SystemExit:
@@ -106,16 +123,18 @@ def main(argv=None, out=None) -> int:
             for f, n, skipped in save_lock.turn_on(switch, folders(project), EXTS):
                 print("{}: locked {} new, left unlocked {} (autosave/quicksave slots, or just written)"
                       .format(f, n, skipped), file=out)
-            print("save locking is ON: new saves are locked once they settle", file=out)
+            print("save locking is ON: on Claude Code new saves are locked once they settle; on another agent only the "
+                  "saves present now are locked", file=out)
             return 0
         if a.action == "off":
-            n = save_lock.turn_off(switch, folders(project), EXTS)
+            kwargs = {"forget_missing": True} if a.forget_missing else {}
+            n = save_lock.turn_off(switch, folders(project), EXTS, **kwargs)
             print("save locking is OFF; {} lock(s) lifted, so the saves are plain files again".format(n), file=out)
             return 0
         return _unlock(project, a.target, out)
     except save_lock.Unsupported as e:
         print("unsupported: {}".format(e), file=out)
         return 3
-    except (PermissionError, OSError) as e:
+    except (PermissionError, OSError, ValueError) as e:     # ValueError: a malformed paths file
         print(str(e), file=out)
         return 2

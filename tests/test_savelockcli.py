@@ -27,6 +27,8 @@ def kit(tmp_path, monkeypatch):
     monkeypatch.setattr(save_lock, "user_sid", lambda: "S-1-5-21-1")
     monkeypatch.setattr(save_lock, "status_map", lambda folder, exts: {})
     monkeypatch.setattr(save_lock, "is_locked", lambda p: False)
+    monkeypatch.setattr(save_lock, "has_acls", lambda folder: True)
+    monkeypatch.setattr(save_lock, "is_plain", lambda p: True)
     monkeypatch.setattr(save_lock, "lock_file", lambda p, sid: calls.append(("lock", os.path.basename(p))))
     monkeypatch.setattr(save_lock, "lock_folder", lambda p, sid: calls.append(("folder", str(p))))
     monkeypatch.setattr(save_lock, "unlock", lambda p, sid: calls.append(("unlock", os.path.basename(p))))

@@ -69,8 +69,11 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
         reason = rules.message("W-SAVE-STORE", file=file_path)
         audit.rule(HOOK, "W-SAVE-STORE", "deny", reason)
         return Verdict("deny", reason)
-    if placed and self_rules.save_lock_target(placed, roots):
-        reason = rules.message("W-SAVE-LOCK", file=os.path.basename(placed))
+    # A stream of the file is the file, and an 8.3 spelling resolves to nothing: read by the name, as the shell route does.
+    lock_word = re.split(r"[/\\]", file_path.replace("::$DATA", ""))[-1].split(":", 1)[0].lower()
+    bare = placed.split("::", 1)[0] if placed else placed
+    if (bare and self_rules.save_lock_target(bare, roots)) or (roots is not None and not placed and lock_word == "save-lock.json"):
+        reason = rules.message("W-SAVE-LOCK", file=lock_word)
         audit.rule(HOOK, "W-SAVE-LOCK", "deny", reason)
         return Verdict("deny", reason)
     # User ruling 2026-10-20: the agent's own session transcripts (save approvals are read there) are the host's alone.

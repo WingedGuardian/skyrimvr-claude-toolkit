@@ -104,10 +104,14 @@ def handle(args, root, *, local_files=(), review_builder=None, candidate_prepare
     raise ValueError("not a shared upgrade command")
 
 
+SHIPPED_LOCAL = frozenset((".codex/config.toml", ".opencode/opencode.jsonc"))
+
+
 def failure(command, exc, label):
     from .contracts import Result
     status = (1 if isinstance(exc, UpgradeFailed) else 2) if command in ("upgrade-preview", "upgrade-stage", "upgrade-apply", "upgrade-rollback") else 0
-    reason = label + ": " + (str(exc) if command in ("upgrade-apply", "upgrade-rollback") else type(exc).__name__)
+    reason = label + ": " + (str(exc) if command in ("upgrade-preview", "upgrade-stage", "upgrade-apply", "upgrade-rollback")
+                             else type(exc).__name__)
     return {"api_version": 1, "result": Result("deny", "failed", reason=reason).as_dict(), "transactions": []}, status
 
 
@@ -227,7 +231,9 @@ def apply(root, bundle, expected_sha256, choices=None, *, quiescent=False, reser
         if expected is not None and rollback.get(name) != expected:
             raise ValueError("review lacks independent rollback authority: " + name)
         action = row.get("action")
-        default = "candidate" if action in ("create", "replace_verified_owned") else "keep"
+        # A local config a release also ships is not created by default: the user's copy, or none, is the state to keep.
+        # Anything else local-only in a candidate (a recovery store, local settings) stays refused below.
+        default = "candidate" if action in ("create", "replace_verified_owned") and name not in SHIPPED_LOCAL else "keep"
         if action == "preserve_collision" and name not in choices:
             raise ValueError("unresolved installed collision: " + name)
         selected = choices.get(name, default)

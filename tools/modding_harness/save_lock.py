@@ -563,10 +563,14 @@ def _remember(config, folder):
 
 
 def turn_on(config, folders, extensions, rotating=ROTATING, settle=SETTLE_S):
-    """Lock every folder now, then write and lock the switch (an agent cannot edit it off). Everything checkable is
-    checked before any rule goes on, and the switch comes LAST: it needs an elevated prompt to undo, so a folder that
-    fails leaves it unset, and the error says which locks were applied. Refused from an elevated process: the locks
-    would not hold the agent that is asking."""
+    """Lock every folder now, then write and lock the switch. Everything checkable is checked before any rule goes on,
+    and the switch comes LAST: it needs an elevated prompt to undo, so a folder that fails leaves it unset, and the error
+    says which locks were applied. Refused from an elevated process: the locks would not hold the agent that is asking.
+
+    The switch's rule stops an edit in place. It does NOT stop a delete or a replace: Windows allows those when the folder
+    grants "delete files inside", and this folder gets no rule because the record beside the switch is replaced through
+    it. So a script can remove the switch; a host's guard refuses the routes it can read, and its sentinel reports the
+    change at the next look (a switch that went from on to off)."""
     _require()
     if is_elevated():
         raise PermissionError("refusing to switch save locking on from an elevated process: " + ELEVATED_WARNING)
@@ -667,11 +671,13 @@ def turn_off(config, folders=(), extensions=(), forget_missing=False):
 
 
 def auto_lock(state, before, files, folders, now=None, rotating=ROTATING, settle=SETTLE_S, verify=VERIFY_S,
-              extensions=None, config=None):
+              extensions=None, config=None, exempt=()):
     """Lock every settled save not locked yet, and give each folder its rule the first time it is seen. `before`/`files`
     are the sentinel's previous and current snapshots ({key: [size, mtime_ns, path]}); `state` (the sentinel's dict)
     remembers what is locked, so a call locks only new or changed saves, and the real ACLs are re-read at most every
     `verify` seconds (at the next look when a read failed). `config`, the switch, says where `off`'s record lives.
+    `exempt`: paths the user just unlocked, for a repair in progress: a save named here, or any save in a folder named
+    here, stays as it is, and so does a named folder's rule.
     Returns what could not be locked: a save's path, or "<folder> (<reason>)" for a folder's rule or a failed read."""
     _require()
     now = time.time() if now is None else now
@@ -693,8 +699,9 @@ def auto_lock(state, before, files, folders, now=None, rotating=ROTATING, settle
                 good = False
         if good:
             state["lock_verified"] = now
+    spared = {os.path.normcase(str(p)) for p in exempt}
     for folder in folders:
-        if folder in ruled:
+        if folder in ruled or os.path.normcase(str(folder)) in spared:
             continue
         try:
             if config is not None:
@@ -711,6 +718,9 @@ def auto_lock(state, before, files, folders, now=None, rotating=ROTATING, settle
         changed = key in before and list(before[key][:2]) != [size, mtime]
         if key in locked and not changed:
             continue                       # locked, and not changed since the last look: nothing to do
+        if os.path.normcase(path) in spared or os.path.normcase(os.path.dirname(path)) in spared:
+            locked.pop(key, None)
+            continue
         if (rotating is not None and rotating.match(os.path.basename(path))) or now - mtime / 1e9 < settle:
             locked.pop(key, None)
             continue

@@ -4,8 +4,8 @@
 # whole charter and open ledger through skyguard (tools/skyguard/session.py, with_charter).
 #
 # NOT a guard, and deliberately outside skyguard and .claude/hooks/: it decides nothing, it only adds context,
-# so it carries no heartbeat, no interpreter fallback chain and no fail-closed path. A failure prints nothing
-# and exits 0; a session without its ledger line is still a working session. Routing it through the skyguard
+# so it carries no heartbeat, no interpreter fallback chain and no fail-closed path. A crash prints nothing and an
+# unreadable ledger prints one line, and both exit 0; a session without its ledger line is still a working session. Routing it through the skyguard
 # engine would cost every prompt what a guarded Bash call costs (MEASURED on a Windows install: 3.1 s mean
 # over 10 calls).
 #
@@ -31,12 +31,13 @@ CDPATH= cd -- "$_CWD" >/dev/null 2>&1
 [ -f "$ROOT/.agent-sessions/$SID.md" ] && [ ! -e "$ROOT/.agent-sessions/$SID.ledger.jsonl" ] && exit 0
 
 PY=""
-if [ -r "$ROOT/skyrim-paths.env" ]; then
+for _PATHS in "$ROOT/.claude/skyrim-paths.env" "$ROOT/skyrim-paths.env"; do     # the 3.x location first, so the root file wins
+    [ -r "$_PATHS" ] || continue
     while IFS= read -r line || [ -n "$line" ]; do
         line="${line%$'\r'}"
         case "$line" in SKYGUARD_PYTHON=*) PY="${line#SKYGUARD_PYTHON=}" ;; esac
-    done < "$ROOT/skyrim-paths.env"
-fi
+    done < "$_PATHS"
+done
 case "$PY" in \'*\') PY="${PY:1:${#PY}-2}"; PY="${PY//\'\\\'\'/\'}" ;; esac
 [ -n "$PY" ] || exit 0
 
