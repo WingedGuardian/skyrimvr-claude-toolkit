@@ -15,6 +15,8 @@ Without `roots` (an old caller) both fall back to the legacy text tests.
 from __future__ import annotations
 
 import os
+import posixpath
+import re
 
 from . import rules, self_rules, targets
 from .grep import grep
@@ -97,9 +99,11 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
         audit.rule(HOOK, "W-SELF-GUARD", "advise", text)
         return Verdict("allow", "", text)
 
-    if grep(r"(^|(?<![/\\])[/\\]+)\.claude[/\\]+(hooks|plans|backups|memory|projects)[/\\]+", file_path):
+    # `..` folded first: `.claude/backups/../../../Saves/x.ess` is not in .claude/backups.
+    folded = re.sub(r"^//+", "//", posixpath.normpath(file_path.replace("\\", "/")))
+    if grep(r"(^|(?<![/\\])[/\\]+)\.claude[/\\]+(hooks|plans|backups|memory|projects)[/\\]+", folded):
         return Verdict()
-    if grep(r"(?<![/\\])[/\\]+node_modules[/\\]+", file_path):
+    if grep(r"(?<![/\\])[/\\]+node_modules[/\\]+", folded):
         return Verdict()
 
     advice = Advice()
@@ -110,8 +114,11 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
         advice.add(text)
 
     if roots is not None:
-        from .writes import in_install_area, is_save
+        from .writes import _unplaced_save, in_install_area, is_save
         a = targets.resolve_literal(file_path, cwd, os.environ if env is None else env)
+        if a is None and _unplaced_save(file_path):
+            from . import saves     # a real path the guard cannot resolve: S-SAVE-UNKNOWN, as saves.py says
+            return saves.judge(saves.Change((saves.Target("", op if op in saves.OPS else "write", True),)), Verdict(), audit, HOOK)
         if is_save(a, roots):
             # The save policy (user ruling 2026-10-13): a save changed through Edit/Write or a patch is backed up
             # first (portable.check); saves.judge decides it with every other save the call changes.

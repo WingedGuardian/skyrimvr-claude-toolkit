@@ -64,6 +64,8 @@ _PS_VAR = re.compile(r"\$(?:\{(env:)?([A-Za-z_][A-Za-z0-9_]*)\}|(env:)?([A-Za-z_
 _BRACE_GROUP = re.compile(r"\{[^{}]*\}")       # one bash brace group, innermost; linear (no nested repetition)
 _LIVE_DOLLAR = re.compile(r"\$[A-Za-z0-9_{(?!#*@$-]")
 _CMD_VAR = re.compile(r"%([A-Za-z_][A-Za-z0-9_]*)%")
+_PWD_SUBST = {"powershell": re.compile(r"\$\(\s*(?:pwd|Get-Location|gl)\s*\)", re.IGNORECASE),
+              "bash": re.compile(r"\$\(\s*pwd(?:\s+-[LP])?\s*\)|`\s*pwd(?:\s+-[LP])?\s*`")}
 _PS_PROVIDER = re.compile(r"(?:Microsoft\.PowerShell\.Core\\)?FileSystem::", re.IGNORECASE)
 _PS_DRIVE = re.compile(r"[A-Za-z][A-Za-z0-9_]+:")      # HKLM:, Env:, Cert: -- not the filesystem
 _PS_SPLAT = re.compile(r"@[A-Za-z_?$^]")                # `@name`: PowerShell splatting, a variable's value
@@ -107,6 +109,8 @@ def _var(name: str, env: Mapping[str, str], cwd: Optional[str]) -> str:
 
 def _expand(word: str, dialect: str, env: Mapping[str, str], cwd: Optional[str]) -> str:
     """The word with its home/cwd variables substituted; _Unresolvable for any other expansion."""
+    if cwd and dialect in _PWD_SUBST:          # `$(pwd)/Data` is `$PWD/Data`: one spelling must not get the other's answer
+        word = _PWD_SUBST[dialect].sub(lambda _m: cwd, word)
     if dialect == "cmd":
         out = _CMD_VAR.sub(lambda m: _var(m.group(1), env, cwd), word)
         if "%" in out:
@@ -526,9 +530,10 @@ def _user_documents(pc) -> bool:
     if len(pc) == 2:
         return True
     for i, c in enumerate(pc[:-1]):
-        if c in ("users", "home"):
+        if c in ("users", "home"):              # the last one counts: /home/u/.../pfx/drive_c/users/steamuser/Documents
             between = pc[i + 2:-1]
-            return not between or (len(between) == 1 and between[0].startswith("onedrive"))
+            if not between or (len(between) == 1 and between[0].startswith("onedrive")):
+                return True
     return False
 
 

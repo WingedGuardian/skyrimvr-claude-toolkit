@@ -83,7 +83,7 @@ def test_home_family(word, dialect, want):
 
 
 @pytest.mark.parametrize("word,dialect", [
-    ("$X/a", "bash"), ("${X:-a}/b", "bash"), ("$(pwd)/a", "bash"), ("~user/x", "bash"), ("~+/x", "bash"),
+    ("$X/a", "bash"), ("${X:-a}/b", "bash"), ("$(cat f)/a", "bash"), ("~user/x", "bash"), ("~+/x", "bash"),
     ("$x/a", "powershell"), ("$env:TEMP/a", "powershell"), ("%TEMP%/a", "cmd"),
     ("%i", "cmd"), ("%~dp0/x", "cmd"), ("%1", "cmd"),
     ("-", "bash"), ("", "bash"),

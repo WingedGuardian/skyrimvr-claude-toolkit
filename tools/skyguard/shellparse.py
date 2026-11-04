@@ -251,12 +251,19 @@ PS_SWITCHES = ("recurse", "force", "whatif", "confirm", "verbose", "debug", "pas
                "readonly", "system", "followsymlink", "usetransaction", "asstring", "asbytestream")
 
 
-def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, ...]:
+def ps_param(ex: Exec, name: str, position: Optional[int] = None, slot: Tuple[str, ...] = (),
+             before: Tuple[Tuple[str, ...], ...] = ()) -> Tuple[str, ...]:
     """Values of PowerShell parameter `name` in `ex.argv`: `-Name v`, `-Na v` (any prefix), `-Name:v`; plus the
     `position`-th positional argument (0-based) when given. A word `-x` that is a prefix of a known switch takes
-    no value; any other `-x` is assumed to take one. A comma list is one argument and yields all its items."""
+    no value; any other `-x` is assumed to take one. A comma list is one argument and yields all its items.
+
+    PowerShell binds named parameters first, then gives the positional words to the positions still unfilled, so
+    `Copy-Item -Path a b` makes b the Destination. `slot`: other names of this position (a named one fills it, so no
+    positional word lands here). `before`: the names of each earlier position (each one filled by name moves this
+    position's word one to the left)."""
     want = name.lower()
     out, pos, k, argv = [], [], 0, ex.argv
+    named = []
 
     def group(i):
         """The list starting at argv[i] (`a,b,c`), and the index of its last item."""
@@ -271,6 +278,7 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
         if w.startswith("-") and len(w) > 1 and not q:
             key, _, attached = w[1:].partition(":")
             key = key.lower()
+            named.append(key)
             if key and want.startswith(key):
                 if attached:
                     out.append(attached)
@@ -286,8 +294,13 @@ def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, 
         items, k = group(k)
         pos.append(items)
         k += 1
-    if position is not None and position < len(pos):
-        out.extend(pos[position])
+    def by_name(names):
+        return any(key and n.startswith(key) for key in named for n in names)
+
+    if position is not None and not (slot and by_name((want,) + slot)):
+        position -= sum(1 for names in before if by_name(names))
+        if 0 <= position < len(pos):
+            out.extend(pos[position])
     return tuple(out)
 
 
@@ -1061,7 +1074,7 @@ class _Bash(_Scanner):
             self.i = i + 2
             return
         if nx == "{":
-            end = self._brace_end(i + 2)
+            end = self._brace_end(i + 2, f.mode == "dq")
             self._skipped(f, i + 2, end - 1, False)
             w.add(t[i:end])
             w.dyn = True
@@ -1111,14 +1124,14 @@ class _Bash(_Scanner):
         if not found and arith and _CMDLIKE.match(t, a, b):
             raise ParseError("a (( )) whose body reads as a command")
 
-    def _brace_end(self, j):
+    def _brace_end(self, j, in_dq=False):
         """End (exclusive) of a ${ ... } expansion starting after `${`, nested braces counted. Quotes protect braces in
         an unquoted expansion and are ordinary characters in a double-quoted one, so where the two readings disagree
         this declines to choose: `echo ${a:-'{'} ; rm x ; echo }` ran the rm while a quote-blind count hid it."""
-        end = self._brace_scan(j, False)
+        end = self._brace_scan(j, "")
         if end is None:
             raise ParseError("unterminated ${")
-        if self._brace_scan(j, True) != end:
+        if self._brace_scan(j, "\"" if in_dq else "'\"") != end:
             raise ParseError("a ${ } whose end depends on how its quotes are read")
         return end
 
@@ -1129,7 +1142,7 @@ class _Bash(_Scanner):
             if c == "\\":
                 j += 2
                 continue
-            if quotes and c in "'\"":
+            if c in quotes:                # inside "...", a ' is an ordinary character: `"${n:-don't}"`
                 j += 1
                 while j < n and t[j] != c:
                     j += 2 if c == '"' and t[j] == "\\" else 1
@@ -2045,6 +2058,14 @@ _WRAPPERS = {
     "ionice": (frozenset(("-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid", "--pgid", "--uid")), 0),
     "chroot": (frozenset(("--userspec", "--groups")), 1),
     "busybox": (frozenset(), 0),
+    "toybox": (frozenset(), 0),
+    "gsudo": (frozenset(("-u", "--user", "-d", "--direct", "--loadProfile")), 0),
+    "pkexec": (frozenset(("--user",)), 0),
+    "runuser": (frozenset(("-u", "--user", "-g", "--group", "-G", "--supp-group", "-c", "--command", "-s", "--shell")), 0),
+    "systemd-run": (frozenset(("-u", "--unit", "-p", "--property", "-d", "--description", "--slice", "-E", "--setenv", "-H",
+                               "--host", "-M", "--machine", "--uid", "--gid", "--nice", "--working-directory")), 0),
+    "chrt": (frozenset(("-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline")), 1),
+    "prlimit": (frozenset(("-p", "--pid", "-o", "--output")), 0),
     "strace": (frozenset(("-o", "-e", "-p", "-s", "-u", "-E", "-a", "-b", "-I", "-O", "-S", "-X", "-P")), 0),
     "ltrace": (frozenset(("-o", "-e", "-p", "-s", "-u", "-a", "-n")), 0),
     "unbuffer": (frozenset(), 0),
@@ -2840,8 +2861,8 @@ class _Resolver:
             words = [w for w in e.argv if not w.startswith("/")]
             src, new = (words[0], words[1]) if len(words) > 1 else ("", "")
         else:
-            s = ps_param(e, "Path", 0) or ps_param(e, "LiteralPath")
-            nn = ps_param(e, "NewName", 1)
+            s = ps_param(e, "path", 0, slot=("literalpath",)) or ps_param(e, "LiteralPath")
+            nn = ps_param(e, "newname", 1, before=(("path", "literalpath"),))
             src, new = (s[0] if s else ""), (nn[0] if nn else "")
         if not src or not new:
             return
@@ -3413,7 +3434,7 @@ _TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))   # printf
 _PLAIN_ARG = re.compile(r"[A-Za-z0-9_./:@%+,=~-]+")
 _POSITIONAL = re.compile(r"\$(?:\{([1-9])\}|([1-9])|\{?([@*])\}?)")
 # In command position only: `echo shift` moves nothing.
-_ARGS_MOVED = re.compile(r"(?:^|(?P<lead>[;&|({\n]))[ \t]*(?:shift(?:[ \t]+(?:(?P<count>[0-9]+)|(?P<computed>[^\s;&|)}]+)))?"
+_ARGS_MOVED = re.compile(r"(?:^|(?P<lead>[;&|({\n]))[ \t]*(?:(?:then|do|else|elif|builtin|command|!)[ \t]+)*(?:shift(?:[ \t]+(?:(?P<count>[0-9]+)|(?P<computed>[^\s;&|)}]+)))?"
                          r"|(?P<set>set[ \t]+--?))(?=$|[;&|)}\s])")
 _BRANCHES = re.compile(r"(?:^|[;&|({\s])(?:if|while|until|for|case|select)(?=\s)|&&|\|\|")
 
