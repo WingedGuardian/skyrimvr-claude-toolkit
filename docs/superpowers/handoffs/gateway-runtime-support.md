@@ -29,6 +29,10 @@ this handoff does not authorize weakening it or transplanting hashes.
   interface. Inventory and verify the actual target before choosing an integration.
 - Continue using the established guarded named-loader for save pairs. No new generic
   load/save interface or hook change is part of this promotion.
+- Its installed compatibility binding also needs a supported toolkit-owned interface and
+  explicitly scoped consumer state: a previous save-upgrade experiment's working folder
+  must not become the permanent shared control directory. Coordinate this with the
+  guarded-loader owner, preserving its behavior, source qualification and backup policy.
 - The historical reference class has an unused hard-link capture branch; the consumer's
   override avoids it. Do not promote the entire class unchanged or expose that branch.
   Keep reference-only capture and the independently checked restoration behavior.
@@ -48,6 +52,9 @@ API names/layout are for the toolkit owner to settle; these are behavioral contr
 | Qualification/provenance | Exact sources for the consumed package, supported host bindings and relevant dependency closure; separate test evidence and capability limits. No dependency on another project's whole build receipt or unneeded native sources. |
 
 Ownership/approval readers, output roots and installed host bindings must be explicit inputs.
+Use the authoritative shared game/runtime lease provider; per-consumer evidence/state must
+not create independent locks that allow competing owners. Reuse existing coordination
+where supported instead of introducing a parallel task system.
 Do not ship private game-root paths, NAS locations, mutable global task roots or a consumer's
 lease-ledger path in toolkit defaults. The consumer remains responsible for fresh launch
 approval, desktop choice, its profile/fixture declarations and existing money/turn ledgers.
