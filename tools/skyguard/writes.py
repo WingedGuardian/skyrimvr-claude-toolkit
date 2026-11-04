@@ -71,6 +71,7 @@ import ast
 import os
 import posixpath
 import re
+import unicodedata
 from pathlib import Path
 from typing import List, Mapping, NamedTuple, Optional, Tuple
 
@@ -418,57 +419,77 @@ def text_write_targets_ps(text: str) -> List[str]:
 class _CopyWord(str):
     """A name a copy or move writes or takes away: judged as cp and mv are, not as a raw write of the bytes."""
 
-    def __new__(cls, word, source="", moved=False, tree=False):
+    def __new__(cls, word, source="", moved=False, tree=False, removed=False):
         self = str.__new__(cls, word)
-        self.source, self.moved, self.tree = source or "", moved, tree
+        self.source, self.moved, self.tree, self.removed = source or "", moved, tree, removed
         return self
 
 
 # Python this guard cannot parse: a newer syntax than the guard's own Python (a nested f-string quote), or a shell
-# variable in the code. Refusing all of it refused 67 of 114,631 real commands, most of them read-only one-liners
-# (2026-11-04). Python that reads and prints cannot hurt anything, so unreadable code is let through only when its text
-# shows no way to change a file, run a program or reach a name indirectly. Anything else keeps the refusal. A word in a
-# comment or string counts too: a false hit costs only the refusal this code had anyway.
+# variable in the code. Refusing all of it refused 67 of 114,631 real commands, many of them read-only one-liners
+# (2026-11-04). This is a text scan for the common spellings of a change, an accident check and no proof: review found
+# contrived code that passes it. It keeps the refusal on anything that names a way to change a file, run a program or
+# reach a name indirectly, in a comment or string too: a false hit costs only the refusal this code had anyway.
 _READ_ONLY_IMPORTS = frozenset((
     "base64", "binascii", "collections", "copy", "csv", "dataclasses", "datetime", "decimal", "difflib",
     "enum", "fnmatch", "fractions", "functools", "glob", "hashlib", "html", "itertools", "json", "locale", "math",
     "os", "os.path", "pathlib", "platform", "pprint", "random", "re", "statistics", "string", "struct",
     "sys", "textwrap", "time", "typing", "unicodedata", "xml.etree", "xml.etree.ElementTree"))
 _READ_OPEN = re.compile(
-    r"""(?<![.\w])open\(\s*(?:[rRbBuUfF]{0,2}"[^"\n]*"|[rRbBuUfF]{0,2}'[^'\n]*'|[\w.\[\]]+)\s*"""
+    r"""(?<![.\w])open\(\s*(?:[rRbBuU]{0,2}"[^"\n]*"|[rRbBuU]{0,2}'[^'\n]*'|[\w.\[\]]+)\s*"""
     r"""(?:,\s*(?:mode\s*=\s*)?['"](?:r|rb|rt|br|tr)['"])?\s*"""
     r"""(?:,\s*(?:encoding|errors|newline)\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[\w.]+))*\s*\)""")
 _OS_READS = ("environ|path|getcwd|sep|linesep|listdir|scandir|walk|stat|lstat|access|getenv|getpid|cpu_count|fspath|"
              "name|pathsep|curdir|pardir")
 _MAY_CHANGE = re.compile(
     r"""\bopen\b"""                                    # what is left once the plain reads are taken out
-    r"""|\bos\s*\.\s*(?!(?:""" + _OS_READS + r""")\b)"""
-    r"""|\b(?:write|write_text|write_bytes|writelines|unlink|rmdir|mkdir|touch|rename|chmod|symlink_to|hardlink_to|"""
-    r"""truncate|exec|eval|compile|getattr|setattr|delattr|__import__|globals|locals|vars|breakpoint)\s*\("""
-    r"""|\b(?:shutil|subprocess|Popen|importlib|ctypes|modules|builtins)\b|__\w+__"""
-    r"""|\$\(|`""")                                    # a shell command inside the code
-_IMPORT = re.compile(r"""\bfrom\s+([\w.]+)\s+import\s+([^\n;]+)|\bimport\s+([^\n;]+)""")
-_STRING = re.compile(r"""[rRbBuUfF]{0,2}(?:"[^"\n]*"|'[^'\n]*')""")
+    r"""|\bos\b(?!\s*\.\s*(?:""" + _OS_READS + r""")\b)"""
+    r"""|\b(?:write|write_text|write_bytes|writelines|unlink|rmdir|mkdir|makedirs|touch|rename|chmod|symlink_to|"""
+    r"""hardlink_to|truncate|exec|eval|getattr|setattr|delattr|globals|locals|vars|breakpoint)\b"""
+    r"""|(?<!re\.)\bcompile\b"""
+    r"""|\b(?:shutil|subprocess|Popen|importlib|ctypes|modules|builtins|f_builtins|io)\b|\b_[A-Za-z_]\w*"""
+    r"""|\$\(|`|%\w+%""")                              # a shell command or a cmd variable inside the code
+_IMPORT = re.compile(r"""\bfrom\s+([\w.]+)\s*import\b([^\n;]*)|\bimport\b([^\n;]*)""")
+_STRING = re.compile(r"""[rRbBuUfF]{0,2}(?:"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')""")
 
 
 def _unparsed_may_change_files(code: str) -> bool:
-    text = _READ_OPEN.sub(" ", code)
-    if _MAY_CHANGE.search(text) or re.fullmatch(r"""\s*["']?\$\{?\w+\}?["']?\s*""", code):
+    # As Python and the shell will read it: names are NFKC-normalised. A backslash at a line's end is a space to Python
+    # between two tokens, and nothing at all to bash in an unquoted heredoc.
+    text = unicodedata.normalize("NFKC", code).replace("\r\n", "\n")
+    return any(_names_a_change(t) for t in (text.replace("\\\n", " "), text.replace("\\\n", "")))
+
+
+def _names_a_change(text: str) -> bool:
+    if re.fullmatch(r"""\s*["']?\$\{?\w+\}?["']?\s*""", text):
         return True
     # A shell variable outside a string can hold any code. Inside one it is only text, as in code this guard can read.
-    if "$" in _STRING.sub(" ", code):
-        return True
-    if re.search(r"\b(?:Path|pathlib)\b", text) and ".replace(" in text:   # Path.replace moves a file; str's cannot
+    if "$" in _STRING.sub(" ", text):
         return True
     for frm, what, plain in _IMPORT.findall(text):
         if frm:
             # `from os import remove` takes the name past the os. check, so only the os.path submodule may be named.
-            if frm not in _READ_ONLY_IMPORTS or frm == "os" or "*" in what or re.search(r"\bas\b", what):
+            if (frm not in _READ_ONLY_IMPORTS or frm == "os" or re.search(r"[*(]|\bas\b", what)
+                    or _MAY_CHANGE.search(what)):
                 return True
         else:
             for part in plain.split(","):
                 if part.strip() not in _READ_ONLY_IMPORTS:     # `import os as o` is not in the list: o.remove is unread
                     return True
+    text = _READ_OPEN.sub(" ", _IMPORT.sub(" ", text))
+    if _MAY_CHANGE.search(text):
+        return True
+    return bool(re.search(r"\b(?:Path|pathlib)\b", text) and re.search(r"\.\s*replace\b", text))   # Path.replace moves a file
+
+
+def _runs_past_a_syntax_error(e, code: str) -> bool:
+    """`python -i` carries on after a syntax error, so code it cannot compile still runs line by line."""
+    if not shellparse._PYTHON.fullmatch(e.program) or not any(re.fullmatch(r"-[A-Za-z]*i[A-Za-z]*", w) for w in e.argv):
+        return False
+    try:
+        python_nodes(code)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return True
     return False
 
 
@@ -532,6 +553,8 @@ def _python_write_targets(code: str) -> List[str]:
             if parent is not None and (func.attr in ("write_bytes", "write_text") or
                                        func.attr == "open" and writing(node, 0)):
                 out.append(parent)
+            if parent is not None and func.attr == "unlink":
+                out.append(_CopyWord(parent, moved=True, removed=True))
             if parent is not None and func.attr in ("rename", "replace"):     # Path(x).rename(y): both change
                 out.append(_CopyWord(parent, moved=True))
                 dest = (literal(node.args[0]) or path_argument(node.args[0])) if node.args else None
@@ -549,6 +572,9 @@ def _python_write_targets(code: str) -> List[str]:
             dest, source = (literal(second) if second is not None else None), (literal(first) if first is not None else None)
             out += [_CopyWord(dest, source or "", tree=name == "shutil.copytree")] if dest else []
             out += [_CopyWord(source, moved=True)] if source and changes[name] == 2 else []
+            continue
+        if name in ("os.remove", "os.unlink", "send2trash.send2trash") and node.args and literal(node.args[0]):
+            out.append(_CopyWord(literal(node.args[0]), moved=True, removed=True))   # read for saves; deletes.py has the rest
             continue
         keyword = "path" if name == "os.truncate" else "file"
         argument = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == keyword), None)
@@ -818,9 +844,14 @@ def _settings_hold_saves(physical: str) -> bool:
     return any(not isinstance(e, FileNotFoundError) for e in failed)
 
 
-def _rsync_relative(argv) -> bool:
-    """`rsync -R a/b/c dest/` writes dest/a/b/c, so a named file does not land where its name says."""
-    return any(w == "--relative" or re.fullmatch(r"-[A-Za-z]*R[A-Za-z]*", w) for w in argv)
+def _keeps_source_folders(e) -> bool:
+    """`rsync -R a/b/c dest/` and `cp --parents a/b/c dest/` write dest/a/b/c, so a name with a folder in it does not
+    land where it looks. A plain top-level name has no folder to keep."""
+    if e.program == "rsync":
+        relative = any(w == "--relative" or re.fullmatch(r"-[A-Za-z]*R[A-Za-z]*", w) for w in e.argv)
+    else:
+        relative = e.program == "cp" and "--parents" in e.argv
+    return relative and any("/" in s.replace("\\", "/") for s in _plain_operands(e.argv)[:-1])
 
 
 def _may_bring_saves(source: str) -> bool:
@@ -1060,7 +1091,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 else:
                     bulk_into_saves(dst)
             elif is_settings_folder(a_bulk, roots) and (
-                    _rsync_relative(e.argv) or e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _plain_operands(e.argv)[:-1])) and (
+                    e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _plain_operands(e.argv)[:-1])) and (
                     _settings_hold_saves(targets.physical_operand(e, dst, cwd, env))):
                 bulk_into_saves(dst, "/Saves")
         for dst, srcs in copy_targets(e):
@@ -1069,6 +1100,10 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             # A save replaced: the destination itself, or a folder destination that takes a save's name.
             if is_save(a_dst, roots):
                 saves.append((targets.physical_operand(e, dst, cwd, env) or "", "write"))
+                continue
+            if is_settings_folder(a_dst, roots) and _keeps_source_folders(e) and _settings_hold_saves(
+                    targets.physical_operand(e, dst, cwd, env)):
+                bulk_into_saves(dst, "/Saves")
                 continue
             if is_save_folder(a_dst, roots) and (not srcs or any(_may_bring_saves(s) for s in srcs
                                                                  if not s.lower().endswith(SAVE_EXTS))):
@@ -1138,6 +1173,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         if code:
             try:
                 lit += [(e, w) for w in text_write_targets(code, python_literals=bool(shellparse._PYTHON.fullmatch(e.program)))]
+                if _runs_past_a_syntax_error(e, code):
+                    raise ValueError("Python literal write scope could not be parsed")
             except ValueError:
                 if not _script_reads_stdin(e, command):
                     raise
@@ -1146,6 +1183,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         a = targets.resolve_literal(word, base, env)                    # a literal: nothing in it expands
         kind = file_class(word, a or "")
         copied = isinstance(word, _CopyWord)
+        if copied and word.removed and not is_save(a, roots):
+            continue
         actual_base = cwd if e is None else (targets.physical_cwd(e, cwd, env) or "")
         if kind == "plugin" and copied:
             if not word.moved and a is not None and game_loads(a, roots):

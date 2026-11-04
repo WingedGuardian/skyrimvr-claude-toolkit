@@ -3530,7 +3530,7 @@ def _reads_code(argv) -> bool:
     for a in argv:
         if a in _CODE_OPTS:
             return False
-        if skip:                                    # `python -X utf8` names no script
+        if skip and "." not in a:                   # `python -X utf8` names no script; `perl -W tool.pl` does
             skip = False
             continue
         if a == "-":

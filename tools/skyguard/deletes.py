@@ -468,7 +468,7 @@ def python_nodes(code: str):
 
 
 def interpreter_delete_targets(code: str, python: bool) -> List[str]:
-    """The literal names `code` deletes (see above); [] when Python code cannot be parsed (writes.scan refuses it)."""
+    """The literal names `code` deletes (see above); [] when Python code cannot be parsed (writes.scan refuses it if its text names a way to change a file)."""
     return [word for word, _into in interpreter_removals(code, python)]
 
 

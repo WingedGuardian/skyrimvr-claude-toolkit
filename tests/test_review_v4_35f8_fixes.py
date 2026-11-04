@@ -101,6 +101,7 @@ def _migrate():
     ("edited", {"CONFIG_DIR": "b"}, {"CONFIG_DIR": "a"}, True),    # the record says another path: the user changed it
     ("edited", {"CONFIG_DIR": "b"}, {}, True),                     # no record: it may be a correction, so it is kept
     ("shipped", {"CONFIG_DIR": "b"}, {}, False),
+    ("edited", {"CONFIG_DIR": "a", "MO2_MODS": "m"}, {"CONFIG_DIR": "a", "GAME_ROOT": "g"}, True),   # no record of MO2's path
 ])
 def test_a_path_counts_as_set_by_hand_only_when_the_record_does_not_say_setup_wrote_it(verdict, carried, recorded, want):
     assert _migrate().path_set_by_hand(verdict, carried, recorded) is want
@@ -117,6 +118,34 @@ def test_oar_user_settings_are_not_treated_as_the_mods_data():
     assert m.MOD_DATA_CONFIG.search(base + "config.json")
     assert not m.MOD_DATA_CONFIG.search(base + "user.json")
     assert not m.MOD_DATA_CONFIG.search("meshes/actors/character/animations/OpenAnimationReplacer/user.json")
+
+
+# ---- the review of 9190266
+
+@pytest.mark.parametrize("command", ["cp --parents Saves/main.ess '<C>/'", "cp --parents -t '<C>' Saves/main.skse"])
+def test_cp_parents_into_the_settings_folder_needs_the_saves_approval(world, command):
+    assert judge(world, command, os.path.dirname(world[0]))[1] == {"S-SAVE-APPROVAL"}
+
+
+@pytest.mark.parametrize("command", ["rsync -R a.ini '<C>/'", "scp -R a.ini '<C>/'", "cp --parents a.ini '<C>/'"])
+def test_a_relative_copy_of_a_top_level_file_is_no_bulk_save_change(world, command):
+    assert judge(world, command, os.path.dirname(world[0]))[0] == "allow"
+
+
+@pytest.mark.parametrize("code", [
+    "from os import remove; remove('<C>/Saves/main.ess')",
+    "from send2trash import send2trash; send2trash('<C>/Saves/main.ess')",
+])
+def test_a_python_delete_of_a_save_by_a_bare_name_is_read(world, code):
+    assert judge(world, 'python -c "{}"'.format(code))[1] & {"S-SAVE-BACKUP", "S-DEL-CONFIG"}
+
+
+def test_a_python_delete_of_an_ordinary_file_adds_no_save_rule(world):
+    assert judge(world, """python -c "from os import remove; remove('x.txt')" """, os.path.dirname(world[0]))[0] == "allow"
+
+
+def test_an_option_value_stops_at_a_file_name_for_perl(world):
+    assert judge(world, """echo "unlink('Data/x.txt')" | perl -W tool.pl""")[0] == "allow"
 
 
 # ---- a destination named by keyword is the same destination

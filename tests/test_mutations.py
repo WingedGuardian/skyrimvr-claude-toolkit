@@ -12261,23 +12261,29 @@ MUTATIONS += [pytest.param("tools/skyguard/writes.py", anchor, replacement, test
               for anchor, replacement, test, name in [
     ('        if not _unparsed_may_change_files(code):\n            return []\n', '',
      _UP + "test_unreadable_code_that_only_reads_names_no_target", "read-only-passes"),
-    ('    text = _READ_OPEN.sub(" ", code)\n', '    text = code\n',
+    ('    text = _READ_OPEN.sub(" ", _IMPORT.sub(" ", text))\n', '    text = _IMPORT.sub(" ", text)\n',
      _UP + "test_unreadable_code_that_only_reads_names_no_target", "plain-read-open-passes"),
-    ('    if "$" in _STRING.sub(" ", code):\n', '    if False:\n', _UPC + "[print($X)]", "shell-variable"),
-    (' or frm == "os" or "*" in what', ' or "*" in what', _UPC + "[from os import remove; remove('a')]", "from-os"),
-    ('    r\"\"\"\\bopen\\b\"\"\"   ', '    r\"\"\"\\bnever_open\\b\"\"\"   ', _UPC + "[open('a', 'w')]", "open-left-over"),
-    ('    r\"\"\"|\\bos\\s*\\.\\s*(?!(?:\"\"\" + _OS_READS + r\"\"\")\\b)\"\"\"\n', '', _UPC + "[os.remove('a')]", "os-call"),
-    ('|modules|builtins)', ')', _UPC + "[sys.modules['os'].remove('a')]", "modules"),
-    ('    r\"\"\"|\\$\\(|`\"\"\")', '    r\"\"\"\"\"\")', _UPC + "[print('$(rm x)')]", "shell-command"),
-    ('    if re.search(r"\\b(?:Path|pathlib)\\b", text) and ".replace(" in text:', '    if False:',
+    ('    if "$" in _STRING.sub(" ", text):\n', '    if False:\n', _UPC + "[print($X)]", "shell-variable"),
+    (' or frm == "os" or re.search', ' or re.search', _UPC + "[from os import remove; remove('a')]", "from-os"),
+    ('    r"""\\bopen\\b"""   ', '    r"""\\bnever_open\\b"""   ', _UPC + "[open('a', 'w')]", "open-left-over"),
+    ('    r"""|\\bos\\b(?!\\s*\\.\\s*(?:""" + _OS_READS + r""")\\b)"""\n', '', _UPC + "[os.remove('a')]", "os-call"),
+    ('|modules|builtins|', '|', _UPC + "[sys.modules]", "modules"),
+    ('    r"""|\\$\\(|`|%\\w+%""")', '    r"""|`|%\\w+%""")', _UPC + "[print('$(rm x)')]", "shell-command"),
+    ('|`|%\\w+%""")', '|`""")', _UPC + "[print(1); %X%]", "cmd-variable"),
+    ('    return bool(re.search(r"\\b(?:Path|pathlib)\\b", text) and re.search(r"\\.\\s*replace\\b", text))', '    return False',
      _UPC + "[from pathlib import Path; Path('a').replace('b')]", "path-replace"),
+    ('unicodedata.normalize("NFKC", code)', 'code', _UPC, "nfkc"),
+    ('for t in (text.replace("\\\\\\n", " "), text.replace("\\\\\\n", ""))', 'for t in (text,)', _UPC, "line-join"),
+    ('|\\b_[A-Za-z_]\\w*"""', '"""', _UPC + "[random._os.remove('a')]", "private-name"),
+    ('                if _runs_past_a_syntax_error(e, code):\n                    raise ValueError("Python literal write scope could not be parsed")\n', '',
+     _UP + "test_python_i_runs_past_a_syntax_error_so_its_code_must_parse", "python-i"),
 ]]
 
 
 # The review of 35f8cd0: one revert per fix.
 _F35 = "tests/test_review_v4_35f8_fixes.py::"
 MUTATIONS += [pytest.param(path, anchor, replacement, test, id="f35-" + name) for path, anchor, replacement, test, name in [
-    ("tools/skyguard/writes.py", '_rsync_relative(e.argv) or e.program not in', 'e.program not in',
+    ("tools/skyguard/writes.py", '            if is_settings_folder(a_dst, roots) and _keeps_source_folders(e) and _settings_hold_saves(', '            if False and _settings_hold_saves(',
      _F35 + "test_a_relative_rsync_into_the_settings_folder_needs_the_saves_approval", "rsync-relative"),
     ("tools/skyguard/shellparse.py", '        if m.group("lead") != ")" or re.search(r"\\bcase\\b", body[:m.start()]):\n', '        if True:\n',
      _F35 + "test_a_shift_after_a_closing_bracket_that_is_no_case_arm_moves_nothing", "shift-bracket-case-only"),
@@ -12289,7 +12295,7 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="f35-" + name) fo
      _F35 + "test_the_wrapped_command_is_read_past_its_options[systemd-run --on-active 5 rm -rf Data]", "systemd-on-active"),
     ("tools/skyguard/shellparse.py", '        skip = a in ("-X", "-W", "--check-hash-based-pycs")\n', '',
      _F35 + "test_python_with_an_option_value_still_reads_its_program_from_a_pipe", "reads-code-option-value"),
-    ("tools/migrate-3x.py", '    return not recorded or any(recorded.get(name) not in (None, value) for name, value in values.items())\n', '    return True\n',
+    ("tools/migrate-3x.py", '    return any(recorded.get(name) != value for name, value in values.items())\n', '    return True\n',
      _F35 + "test_a_path_counts_as_set_by_hand_only_when_the_record_does_not_say_setup_wrote_it", "hand-set-per-record"),
     ("tools/mod-install.py", '(^|/)openanimationreplacer/(?!(?:.*/)?user\\.json$)")', '(^|/)openanimationreplacer/")',
      _F35 + "test_oar_user_settings_are_not_treated_as_the_mods_data", "oar-user-json"),

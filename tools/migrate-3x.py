@@ -619,10 +619,10 @@ def _sh_quote(value: str) -> str:
 
 def path_set_by_hand(verdict: str, values: dict, recorded: dict) -> bool:
     """Should a carried path stay for good? Only an edited file can hold a correction, and 3.9's record tells a note
-    added to the file from a path changed in it. With no record the two look alike, so the path is kept and setup says so."""
+    added to the file from a path changed in it. A path it holds no record of could be either, so it is kept and setup says so."""
     if verdict != "edited":
         return False
-    return not recorded or any(recorded.get(name) not in (None, value) for name, value in values.items())
+    return any(recorded.get(name) != value for name, value in values.items())
 
 
 def paths_file(values: dict, how: str, src_label: str, env: dict) -> str:

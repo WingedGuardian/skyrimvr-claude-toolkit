@@ -23,7 +23,14 @@ CAN_CHANGE = [
     "p.write_bytes(b)", "p.mkdir()", "p.rename(q)", "f.write(x)",
     "os.system('a')", "os.remove('a')", "os . replace('a', 'b')", "print(__builtins__)", "sys.modules['os'].remove('a')",
     "exec('a')", "eval('a')", "compile('a', 'b', 'exec')", "getattr(os, 'remove')('a')",
-    "print($(rm x))", "print(`rm x`)", "print('$(rm x)')",
+    "sys.modules", "print($(rm x))", "print(`rm x`)", "print('$(rm x)')",
+    # What the review of this scan really ran on Python 3.12 past its first version.
+    "from os import*\nremove('a')", "from os import(remove)\nremove('a')", "from os import\\\n remove", "from zipfile import*",
+    "import\\\nzipfile", "(Path('a').unlink)()", "Path('a').unlink\\\n()", "list(map(Path.unlink,[Path('a')]))",
+    "[w('x') for w in [Path('a').write_text]]", "g=getattr", "o=os\no.remove('a')", "os\\\n.remove('a')",
+    "(os # c\n.remove)('a')", "from glob import (\n os as o\n)", "from glob import os", "random._os.remove('a')",
+    "from random import _os", "pathlib.io.FileIO('a','w')", "sys._getframe().f_builtins", "\uff4f\uff50\uff45\uff4e('a','w')",
+    "open(f'{os.remove(1)}')", "Path('a').replace ('b')", "x='\\'';$X;y='\\''", "print(1); %X%", "o\\\npen('a','w')",
 ]
 ONLY_READS = [
     "import sys,json;print(json.load(sys.stdin)['a'] ",
@@ -57,6 +64,11 @@ def _decide(command):
 
 def test_a_read_only_one_liner_in_a_newer_python_syntax_is_allowed():
     assert _decide("""python -c "print(f'{'a':<16}')" """).decision == "allow"
+
+
+def test_python_i_runs_past_a_syntax_error_so_its_code_must_parse():
+    with pytest.raises(ValueError, match="could not be parsed"):
+        _decide("python -i <<'EOF'\n!!\nprint(1)\nEOF")
 
 
 def test_a_shell_variable_in_the_code_position_stays_refused():

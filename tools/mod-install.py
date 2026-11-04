@@ -490,8 +490,12 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
         old_folder = backup / "mod-folder" / data.name if replacing is not None else None
         if old_folder is not None:
             header.append("# UPDATE: the previous mod folder {} is kept whole at {}".format(replacing, old_folder))
-        planned = ["PLANNED  {}".format(target_of(p)) for p in todo]
         shipped_before = previous_install(manifest) if old_folder is not None else {}   # before this run's record replaces it
+        # The mod's own data as the last install wrote it goes on patching against the new plugin if it stays: replace it.
+        todo = [(inner, dest, "OVERWRITE", []) if (action == "CONFIG-NEW" and MOD_DATA_CONFIG.search(inner.replace("\\", "/"))
+                                                   and shipped_before.get(str(dest)) == sha(dest)) else (inner, dest, action, notes)
+                for inner, dest, action, notes in todo]
+        planned = ["PLANNED  {}".format(target_of(p)) for p in todo]
         record(header + ["# STATUS: in progress"] + planned, initial=True)
 
         aside, written = None, []
@@ -525,7 +529,8 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
                          and shipped_before.get(str(replacing / f.relative_to(old_folder))) != sha(f)]
                 for f in old_folder.rglob("*"):
                     rel = f.relative_to(old_folder).as_posix()
-                    if (f.is_file() and MOD_DATA_CONFIG.search(rel) and replacing / rel not in planned_here
+                    if (f.is_file() and f.suffix.lower() in KEPT_CONFIG_SUFFIXES and MOD_DATA_CONFIG.search(rel)
+                            and replacing / rel not in planned_here
                             and shipped_before.get(str(replacing / rel)) != sha(f)):
                         print("  NOT KEPT {} (the mod's own data, not in the new archive; if you edited it, your copy is in "
                               "the backup)".format(triage.clean(str(replacing / rel))))
