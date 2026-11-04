@@ -380,7 +380,9 @@ def main(argv=None) -> int:
     # processes, not a refusal: round-robin chunks, each under its own cap.
     # 1200 like the corpus groups: a 19-file chunk of the 28-file housekeep merge was killed at 98% after 900 s
     # (2026-11-01). The cap catches a hang; it must not refuse a merely large push.
-    groups += [("sentinels and changed-file tests {}/{}".format(k + 1, len(chunks)), chunk, 1200)
+    # 1800, not 1200: a shared-core re-pin selects most of the suite, and the chunk holding setup, housekeep and shell reached 77% of
+    # 1,520 tests at 1200 s, twice, with no test hung (2026-11-03). File size cannot see which tests start real processes.
+    groups += [("sentinels and changed-file tests {}/{}".format(k + 1, len(chunks)), chunk, 1800)
                for chunks in [rest_chunks(rest)] for k, chunk in enumerate(chunks)]
     g.parallel([(name + " ({} files)".format(len(fs)), verbose + fs, t) for name, fs, t in groups if fs])
     if not g.failed:
