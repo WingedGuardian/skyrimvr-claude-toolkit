@@ -120,7 +120,7 @@ def name_problem(name: str) -> str:
 
 KEPT_CONFIG_SUFFIXES = (".ini", ".toml", ".yaml", ".yml", ".cfg", ".json")
 # A mod's own data in a config's clothes: an old copy left behind goes on distributing or patching against the new plugin.
-MOD_DATA_CONFIG = re.compile(r"(?i)(_distr|_kid|_swap|_flm)\.ini$|(^|/)skypatcher/|(^|/)openanimationreplacer/")
+MOD_DATA_CONFIG = re.compile(r"(?i)(_distr|_kid|_swap|_flm)\.ini$|(^|/)skypatcher/|(^|/)openanimationreplacer/(?!(?:.*/)?user\.json$)")
 
 
 def previous_install(manifest: Path) -> dict:
@@ -519,9 +519,16 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
                 planned_here = {q[1] for q in todo}
                 extra = [replacing / f.relative_to(old_folder) for f in old_folder.rglob("*")
                          if f.is_file() and f.suffix.lower() in KEPT_CONFIG_SUFFIXES
+                         and f.relative_to(old_folder).as_posix() not in CARRY_OVER
                          and not MOD_DATA_CONFIG.search(f.relative_to(old_folder).as_posix())
                          and replacing / f.relative_to(old_folder) not in planned_here
                          and shipped_before.get(str(replacing / f.relative_to(old_folder))) != sha(f)]
+                for f in old_folder.rglob("*"):
+                    rel = f.relative_to(old_folder).as_posix()
+                    if (f.is_file() and MOD_DATA_CONFIG.search(rel) and replacing / rel not in planned_here
+                            and shipped_before.get(str(replacing / rel)) != sha(f)):
+                        print("  NOT KEPT {} (the mod's own data, not in the new archive; if you edited it, your copy is in "
+                              "the backup)".format(triage.clean(str(replacing / rel))))
                 for dest in keep + extra:
                     src_old = old_folder / dest.relative_to(replacing)
                     if src_old.is_file():

@@ -2061,10 +2061,12 @@ _WRAPPERS = {
     "toybox": (frozenset(), 0),
     "gsudo": (frozenset(("-u", "--user", "-i", "--integrity")), 0),
     "pkexec": (frozenset(("--user",)), 0),
-    "runuser": (frozenset(("-u", "--user", "-g", "--group", "-G", "--supp-group", "-s", "--shell", "-l", "--login", "-w",
+    "runuser": (frozenset(("-u", "--user", "-g", "--group", "-G", "--supp-group", "-s", "--shell", "-w",
                            "--whitelist-environment")), 0),
     "systemd-run": (frozenset(("-u", "--unit", "-p", "--property", "--description", "--slice", "-E", "--setenv", "-H",
-                               "--host", "-M", "--machine", "--uid", "--gid", "--nice", "--working-directory")), 0),
+                               "--host", "-M", "--machine", "--uid", "--gid", "--nice", "--working-directory", "--on-active",
+                               "--on-boot", "--on-startup", "--on-unit-active", "--on-unit-inactive", "--on-calendar",
+                               "--service-type", "--timer-property", "--path-property", "--socket-property")), 0),
     "chrt": (frozenset(("-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline")), 1),
     "prlimit": (frozenset(("-p", "--pid", "-o", "--output")), 0),
     "strace": (frozenset(("-o", "-e", "-p", "-s", "-u", "-E", "-a", "-b", "-I", "-O", "-S", "-X", "-P")), 0),
@@ -2461,7 +2463,7 @@ class _Resolver:
         """`su ... -c CMD`, `script -c CMD`, `--command=CMD`: re-parse CMD; True if one was found."""
         v, n = self.v, len(self.v)
         for j in range(k, n):
-            if v[j] in ("-c", "--command") and j + 1 < n:
+            if (v[j] in ("-c", "--command") or re.fullmatch(r"-[lmpf]+c", v[j])) and j + 1 < n:
                 self.reparse(v[j + 1], "bash")
                 return True
             if v[j].startswith("--command="):
@@ -2655,6 +2657,8 @@ class _Resolver:
                 k += 1
                 while k < n and v[k].startswith("-") and v[k] != "--":
                     if p in ("flock", "runuser") and v[k] in ("-c", "--command"):
+                        break
+                    if p == "runuser" and (v[k].startswith("--command=") or re.fullmatch(r"-[lmpf]+c", v[k])):
                         break
                     k += 2 if v[k] in argopts else 1
                 if k < n and v[k] == "--":
@@ -3440,6 +3444,13 @@ _ARGS_MOVED = re.compile(r"(?:^|(?P<lead>[;&|({\n)]))[ \t]*(?:(?:then|do|else|el
 _BRANCHES = re.compile(r"(?:^|[;&|({\s])(?:if|while|until|for|case|select)(?=\s)|&&|\|\|")
 
 
+def _args_moved(body: str):
+    """Each move of the arguments. A `)` is command position only in a case arm, not after `$(date)` or in a comment."""
+    for m in _ARGS_MOVED.finditer(body):
+        if m.group("lead") != ")" or re.search(r"\bcase\b", body[:m.start()]):
+            yield m
+
+
 def _call_body(body: str, args, dynamic) -> str:
     """The body with $1..$9 / ${N} / $@ / $* replaced by the call's arguments where each is a plain literal word
     (letters, digits, path punctuation). Any other argument, or a missing one, leaves the reference in place: an
@@ -3449,7 +3460,7 @@ def _call_body(body: str, args, dynamic) -> str:
     command refuses to parse: leaving the references unknown turned a deny into an allow (review round 2)."""
     plain = [a if not dyn and _PLAIN_ARG.fullmatch(a or "") else None for a, dyn in zip(args, dynamic)]
     if _POSITIONAL.search(body):
-        for m in _ARGS_MOVED.finditer(body):
+        for m in _args_moved(body):
             if m.group("set") or m.group("computed") or _BRANCHES.search(body) or m.group("lead") in ("(", "|"):
                 raise ParseError("a function moves its arguments in a way that depends on the run")
 
@@ -3464,7 +3475,7 @@ def _call_body(body: str, args, dynamic) -> str:
         return _POSITIONAL.sub(one, text)
 
     out, at, rest = [], 0, plain
-    for m in _ARGS_MOVED.finditer(body):
+    for m in _args_moved(body):
         out.append(fill(body[at:m.end()], rest))
         at = m.end()
         rest = rest[int(m.group("count") or 1):]
@@ -3515,13 +3526,18 @@ def _ps_reads_commands(e: Exec) -> bool:
 def _reads_code(argv) -> bool:
     """Whether an interpreter takes its PROGRAM from stdin (`python`, `python -`, `node`), rather than from -c/-e
     or a script file (then stdin is data)."""
+    skip = False
     for a in argv:
         if a in _CODE_OPTS:
             return False
+        if skip:                                    # `python -X utf8` names no script
+            skip = False
+            continue
         if a == "-":
             return True
         if not a.startswith("-"):
             return False
+        skip = a in ("-X", "-W", "--check-hash-based-pycs")
     return True
 _SCANNERS = {"bash": _Bash, "powershell": _Pwsh, "cmd": _Cmdexe}
 

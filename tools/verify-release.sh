@@ -405,6 +405,7 @@ except Exception:
   # /home/<login> REAL_HOME. Never an --allow-prefix: only a config folder of that exact shape is allowed.
   cfg_homes=(--home "$(winpath "${REAL_HOME}")")
   login=$(whoami 2>/dev/null) && [ -n "$login" ] && cfg_homes+=(--home "C:/Users/$login")
+  cfg_homes+=(--home "$(winpath "$FAKEHOME")")           # off Windows setup writes below the scrubbed $HOME
   [ -n "$cfg" ] && allow+=(--allow-config "$cfg" "${cfg_homes[@]}")
   # Named by role, never printed: on this machine both sit under the maintainer's home (review N1).
   note "allowed in generated files (machine discovery)" "the Python install${cfg:+, the config folder if shaped right}"

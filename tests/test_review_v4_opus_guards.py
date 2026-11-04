@@ -11,6 +11,8 @@ from conftest import REPO
 sys.path.insert(0, str(REPO / "tools"))
 from skyguard import audit, deletes, paths, shell_rules, shellparse, targets, write_rules, writes  # noqa: E402
 
+ROOTED_ON_A_DRIVE = pytest.mark.skipif(os.name != "nt", reason="PowerShell reads a rooted path against the drive of its working folder")
+
 
 @pytest.fixture(scope="module")
 def world(tmp_path_factory):
@@ -40,14 +42,17 @@ def judge(world, command, shell="bash", cwd=None):
     "Rename-Item -Path '<C>/Saves/main.ess' old.ess",
     "Rename-Item -LiteralPath '<C>/Saves/main.ess' old.ess",
 ])
+@ROOTED_ON_A_DRIVE
 def test_a_named_path_leaves_the_positional_word_to_the_destination(world, command):
     assert judge(world, command, "powershell", "C:/Temp")[2], command
 
 
+@ROOTED_ON_A_DRIVE
 def test_a_named_archive_path_leaves_the_positional_word_to_the_destination(world):
     assert judge(world, "Expand-Archive -Path x.zip '<C>/Saves'", "powershell", "C:/Temp")[1] == {"S-SAVE-APPROVAL"}
 
 
+@ROOTED_ON_A_DRIVE
 def test_a_positional_rename_of_a_guard_file_is_read(world):
     assert "S-SELF-GUARD" in judge(world, "Rename-Item -Path '<I>/.claude/hooks/x.sh' y.sh", "powershell", "C:/Temp")[1]
 
@@ -82,7 +87,8 @@ def test_another_substitution_is_still_unknown():
 # ---- 1.3: a tree restored into the settings folder replaces same-named saves
 @pytest.mark.parametrize("command, shell", [
     ('cp -r bk/Saves "<C>/"', "bash"), ('rsync -a bk/ "<C>/"', "bash"), ('tar -xf p.tar -C "<C>"', "bash"),
-    ('robocopy bk "<C>" /E', "bash"), ('Expand-Archive x.zip -DestinationPath "<C>"', "powershell"),
+    ('robocopy bk "<C>" /E', "bash"),
+    pytest.param('Expand-Archive x.zip -DestinationPath "<C>"', "powershell", marks=ROOTED_ON_A_DRIVE),
 ])
 def test_a_tree_into_the_settings_folder_needs_the_saves_approval(world, command, shell):
     assert judge(world, command, shell, "C:/Temp")[1] == {"S-SAVE-APPROVAL"}
@@ -90,7 +96,7 @@ def test_a_tree_into_the_settings_folder_needs_the_saves_approval(world, command
 
 @pytest.mark.parametrize("command, shell", [
     ('cp -r bk/Saves "<C>/"', "bash"), ('tar -xf p.tar -C "<C>"', "bash"), ('rsync -a bk/ "<C>/"', "bash"),
-    ('Expand-Archive x.zip -DestinationPath "<C>"', "powershell"),
+    pytest.param('Expand-Archive x.zip -DestinationPath "<C>"', "powershell", marks=ROOTED_ON_A_DRIVE),
     ("python -c \"import shutil; shutil.copytree('bk', r'<C>', dirs_exist_ok=True)\"", "bash"),
 ])
 def test_a_tree_into_a_settings_folder_with_no_saves_needs_no_approval(tmp_path, command, shell):
@@ -181,12 +187,12 @@ def test_a_raw_plugin_write_is_still_refused(world):
 
 
 # ---- 1.8: data on stdin to a named script is not code
-@pytest.mark.parametrize("command", ["python tools/parse.py <<'EOF'\nsome: yaml, not python\nEOF", 'python x.py <<< "a b"'])
+@pytest.mark.parametrize("command", ["python tools/parse.py <<'EOF'\nsome: yaml, not python\nEOF", 'python x.py <<< "write( a b"'])
 def test_a_script_reading_its_input_runs(world, command):
     assert judge(world, command, cwd="C:/Temp")[0] == "allow"
 
 
-@pytest.mark.parametrize("command", ["python - <<'EOF'\nnot python at all\nEOF", "python -i x.py <<'EOF'\nnot python at all\nEOF"])
+@pytest.mark.parametrize("command", ["python - <<'EOF'\nnot python at open(p, m)\nEOF", "python -i x.py <<'EOF'\nnot python at open(p, m)\nEOF"])
 def test_a_body_python_runs_as_code_must_still_parse(world, command):
     with pytest.raises(ValueError):
         judge(world, command, cwd="C:/Temp")
@@ -261,6 +267,7 @@ def test_the_native_adapter_is_read_past_a_valued_python_option(world):
     assert judge(world, "python -X utf8 tools/resaver_native.py clean a.ess b.ess --apply")[1] == {"S-SAVE-BACKUP"}
 
 
+@ROOTED_ON_A_DRIVE
 def test_file_replace_takes_its_source_away(world):
     assert judge(world, "[IO.File]::Replace('<I>/Data/x.txt','C:/tmp/y',$null)", "powershell", "C:/Temp")[1] == {"S-DEL-INSTALL"}
     assert judge(world, "[IO.File]::Replace('<I>/Data/a','<I>/Data/b',$null)", "powershell", "C:/Temp")[0] == "allow"
@@ -332,7 +339,7 @@ def test_saves_one_folder_down_still_count(tmp_path):
 
 def test_an_option_value_is_not_a_script_name():
     with pytest.raises(ValueError):
-        shell_rules_decide = "python -X utf8 <<'EOF'\nnot python at all\nEOF"
+        shell_rules_decide = "python -X utf8 <<'EOF'\nnot python at open(p, m)\nEOF"
         writes.scan(shell_rules_decide, shellparse.parse(shell_rules_decide, "bash"), paths.roots("C:/t", "", {"SKYRIM_GAME_ROOT": "C:/t"}), cwd="C:/Temp", env=os.environ)
 
 

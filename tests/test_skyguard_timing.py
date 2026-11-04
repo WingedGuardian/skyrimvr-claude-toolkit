@@ -511,7 +511,7 @@ def _anchored_shapes(N):
         "reg-ps-assign-run": ("$k" + F + "='HKCU:" + BS + F + "'; ") * (N // 137) + "Remove-Item $k",
         "reg-set-run": ("set K" + F + "=" + F + "& ") * (N // 128) + R + " " + D + ' "%K%"',
         "reg-code-run": 'python -c "' + ("os.system('" + R + " " + D + " '" + F + ") ") * (N // 85) + '"',
-        "reg-code-unterminated": 'python -c "' + R + " " + D + " '" + "a" * N + '"',
+        "reg-code-unterminated": 'python -c "' + R + " " + D + " open(p, m) '" + "a" * N + '"',  # unreadable, and it can write
         "reg-opaque-pipe":"printf '%s" + (R + " " + D + " " + F + " ") * (N // 72) + "' | sh",
         "psc-flags": "tool " + ("-o " + W + ".psc ") * (N // 208),
         "psc-eq-flags": "tool " + ("--output=" + F + " ") * (N // 70),

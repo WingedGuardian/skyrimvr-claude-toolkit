@@ -424,6 +424,54 @@ class _CopyWord(str):
         return self
 
 
+# Python this guard cannot parse: a newer syntax than the guard's own Python (a nested f-string quote), or a shell
+# variable in the code. Refusing all of it refused 67 of 114,631 real commands, most of them read-only one-liners
+# (2026-11-04). Python that reads and prints cannot hurt anything, so unreadable code is let through only when its text
+# shows no way to change a file, run a program or reach a name indirectly. Anything else keeps the refusal. A word in a
+# comment or string counts too: a false hit costs only the refusal this code had anyway.
+_READ_ONLY_IMPORTS = frozenset((
+    "base64", "binascii", "collections", "copy", "csv", "dataclasses", "datetime", "decimal", "difflib",
+    "enum", "fnmatch", "fractions", "functools", "glob", "hashlib", "html", "itertools", "json", "locale", "math",
+    "os", "os.path", "pathlib", "platform", "pprint", "random", "re", "statistics", "string", "struct",
+    "sys", "textwrap", "time", "typing", "unicodedata", "xml.etree", "xml.etree.ElementTree"))
+_READ_OPEN = re.compile(
+    r"""(?<![.\w])open\(\s*(?:[rRbBuUfF]{0,2}"[^"\n]*"|[rRbBuUfF]{0,2}'[^'\n]*'|[\w.\[\]]+)\s*"""
+    r"""(?:,\s*(?:mode\s*=\s*)?['"](?:r|rb|rt|br|tr)['"])?\s*"""
+    r"""(?:,\s*(?:encoding|errors|newline)\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[\w.]+))*\s*\)""")
+_OS_READS = ("environ|path|getcwd|sep|linesep|listdir|scandir|walk|stat|lstat|access|getenv|getpid|cpu_count|fspath|"
+             "name|pathsep|curdir|pardir")
+_MAY_CHANGE = re.compile(
+    r"""\bopen\b"""                                    # what is left once the plain reads are taken out
+    r"""|\bos\s*\.\s*(?!(?:""" + _OS_READS + r""")\b)"""
+    r"""|\b(?:write|write_text|write_bytes|writelines|unlink|rmdir|mkdir|touch|rename|chmod|symlink_to|hardlink_to|"""
+    r"""truncate|exec|eval|compile|getattr|setattr|delattr|__import__|globals|locals|vars|breakpoint)\s*\("""
+    r"""|\b(?:shutil|subprocess|Popen|importlib|ctypes|modules|builtins)\b|__\w+__"""
+    r"""|\$\(|`""")                                    # a shell command inside the code
+_IMPORT = re.compile(r"""\bfrom\s+([\w.]+)\s+import\s+([^\n;]+)|\bimport\s+([^\n;]+)""")
+_STRING = re.compile(r"""[rRbBuUfF]{0,2}(?:"[^"\n]*"|'[^'\n]*')""")
+
+
+def _unparsed_may_change_files(code: str) -> bool:
+    text = _READ_OPEN.sub(" ", code)
+    if _MAY_CHANGE.search(text) or re.fullmatch(r"""\s*["']?\$\{?\w+\}?["']?\s*""", code):
+        return True
+    # A shell variable outside a string can hold any code. Inside one it is only text, as in code this guard can read.
+    if "$" in _STRING.sub(" ", code):
+        return True
+    if re.search(r"\b(?:Path|pathlib)\b", text) and ".replace(" in text:   # Path.replace moves a file; str's cannot
+        return True
+    for frm, what, plain in _IMPORT.findall(text):
+        if frm:
+            # `from os import remove` takes the name past the os. check, so only the os.path submodule may be named.
+            if frm not in _READ_ONLY_IMPORTS or frm == "os" or "*" in what or re.search(r"\bas\b", what):
+                return True
+        else:
+            for part in plain.split(","):
+                if part.strip() not in _READ_ONLY_IMPORTS:     # `import os as o` is not in the list: o.remove is unread
+                    return True
+    return False
+
+
 def _python_write_targets(code: str) -> List[str]:
     """Read literal Python write arguments as Python, without running any code.
 
@@ -436,6 +484,8 @@ def _python_write_targets(code: str) -> List[str]:
     try:
         nodes = python_nodes(code)
     except SyntaxError:
+        if not _unparsed_may_change_files(code):
+            return []
         # The invoked Python can have a different syntax version from this guard.
         raise ValueError("Python literal write scope could not be parsed") from None
     except (RecursionError, MemoryError):
@@ -768,6 +818,11 @@ def _settings_hold_saves(physical: str) -> bool:
     return any(not isinstance(e, FileNotFoundError) for e in failed)
 
 
+def _rsync_relative(argv) -> bool:
+    """`rsync -R a/b/c dest/` writes dest/a/b/c, so a named file does not land where its name says."""
+    return any(w == "--relative" or re.fullmatch(r"-[A-Za-z]*R[A-Za-z]*", w) for w in argv)
+
+
 def _may_bring_saves(source: str) -> bool:
     """A copy source that can hold saves: a folder, a wildcard that could match one. A named other file cannot."""
     name = _name(source)
@@ -1005,7 +1060,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 else:
                     bulk_into_saves(dst)
             elif is_settings_folder(a_bulk, roots) and (
-                    e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _plain_operands(e.argv)[:-1])) and (
+                    _rsync_relative(e.argv) or e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _plain_operands(e.argv)[:-1])) and (
                     _settings_hold_saves(targets.physical_operand(e, dst, cwd, env))):
                 bulk_into_saves(dst, "/Saves")
         for dst, srcs in copy_targets(e):

@@ -617,6 +617,14 @@ def _sh_quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
+def path_set_by_hand(verdict: str, values: dict, recorded: dict) -> bool:
+    """Should a carried path stay for good? Only an edited file can hold a correction, and 3.9's record tells a note
+    added to the file from a path changed in it. With no record the two look alike, so the path is kept and setup says so."""
+    if verdict != "edited":
+        return False
+    return not recorded or any(recorded.get(name) not in (None, value) for name, value in values.items())
+
+
 def paths_file(values: dict, how: str, src_label: str, env: dict) -> str:
     label = re.sub(r"[\r\n]+", " ", src_label)         # a folder name with a newline stays in the comment
     out = ["# Written by tools/migrate-3x.py: the paths your 3.x CLAUDE.md held, read from {}.".format(label),
@@ -719,7 +727,7 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
     if "CLAUDE.md" in verdicts:
         paths, how = extract_paths(norm(src.files["CLAUDE.md"].read_bytes()), known, src.env)
     paths_text = paths_file(paths, how, src.label, src.env) if paths else None
-    if paths_text is not None and verdicts["CLAUDE.md"] == "edited":   # edited: a corrected path outlives this one run
+    if paths_text is not None and path_set_by_hand(verdicts["CLAUDE.md"], paths, src.env):   # it outlives this one run
         paths_text = paths_text.rstrip("\n") + "\nSKYRIM_3X_HAND_EDITED=1\n"
     paths_new = paths_text is not None and state.get("carried_paths") != paths
 

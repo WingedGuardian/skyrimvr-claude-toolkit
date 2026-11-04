@@ -6932,7 +6932,7 @@ _P5F_CLAUSES = [
      "            if False:", _MDEL + "test_xargs_mv_with_a_target_reads_its_sources_from_the_pipe"),
     ("p5f-move-unresolved-source-ignores-named-root", _DL,
      "                    unresolved_any = True                     # with a protected root named: S-DEL-UNRESOLVED",
-     "                    pass", _p5f("pipe-get-item-move")),
+     "                    pass", "tests/test_review_v4_35f8_fixes.py::test_an_unresolved_move_source_with_a_protected_root_named_is_refused"),
     ("p5f-move-unresolved-source-no-upstream-check", _DL,
      '                    if (src is UNRESOLVED or e.stdin_from == "pipe") and piped_reach(i):', "                    if False:",
      _MDEL + "test_pipeline_move_of_an_ancestor_of_the_install_is_unresolved"),
@@ -12097,11 +12097,11 @@ MUTATIONS += [pytest.param(path, anchor, replacement, _OG + test, id="opus-" + n
     ("tools/skyguard/writes.py", '            if not word.moved and a is not None and game_loads(a, roots):\n', '            if False:\n',
      "test_a_plugin_copy_is_advice_not_a_refusal[import shutil; shutil.copy('build/My.esp','Data/My.esp')-rules1]", "interp-plugin-copy-advice"),
     ("tools/skyguard/writes.py", '                if not _script_reads_stdin(e, command):\n', '                if False:\n',
-     "test_a_body_python_runs_as_code_must_still_parse[python - <<'EOF'\\nnot python at all\\nEOF]", "stdin-code-must-parse"),
+     "test_a_body_python_runs_as_code_must_still_parse[python - <<'EOF'\\nnot python at open(p, m)\\nEOF]", "stdin-code-must-parse"),
     ("tools/skyguard/writes.py", '                if not _script_reads_stdin(e, command):\n', '                if True:\n',
-     "test_a_script_reading_its_input_runs[python x.py <<< \"a b\"]", "stdin-data-runs"),
+     "test_a_script_reading_its_input_runs[python x.py <<< \"write( a b\"]", "stdin-data-runs"),
     ("tools/skyguard/writes.py", '''    if any(re.fullmatch(r"-[A-Za-z]*i[A-Za-z]*", w) for w in e.argv) or "PYTHONINSPECT" in command:\n''', '''    if "PYTHONINSPECT" in command:\n''',
-     "test_a_body_python_runs_as_code_must_still_parse[python -i x.py <<'EOF'\\nnot python at all\\nEOF]", "stdin-inspect-is-code"),
+     "test_a_body_python_runs_as_code_must_still_parse[python -i x.py <<'EOF'\\nnot python at open(p, m)\\nEOF]", "stdin-inspect-is-code"),
     ("tools/skyguard/writes.py", '            if a_dst is None and _unplaced_save(dst):\n', '            if False:\n',
      "test_an_unresolvable_literal_save_path_is_refused", "unplaced-save-shell"),
     ("tools/skyguard/writes.py", '''not re.search(r"[$`%]", word) and bool''', '''bool''',
@@ -12228,7 +12228,7 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="opus2-" + name)
     ("tools/skyguard/shellparse.py", '    "gsudo": (frozenset(("-u", "--user", "-i", "--integrity")), 0),\n', '    "gsudo": (frozenset(("-u", "--user", "-d", "--direct")), 0),\n',
      _OG + "test_wrapper_options_do_not_hide_the_command[gsudo -d rm -rf Data]", "gsudo-boolean-d"),
     ("tools/skyguard/shellparse.py", 'if p in ("flock", "runuser") and v[k] in ("-c", "--command"):', 'if p == "flock" and v[k] in ("-c", "--command"):',
-     _OG + "test_wrapper_options_do_not_hide_the_command[runuser -l root -c 'rm -rf Data']", "runuser-c"),
+     "tests/test_review_v4_35f8_fixes.py::test_the_wrapped_command_is_read_past_its_options[runuser -l -c 'rm -rf Data' root]", "runuser-c"),
     ("tools/skyguard/shellparse.py", '(?P<lead>[;&|({\\n)]))[ \\t]*(?:(?:then|do', '(?P<lead>[;&|({\\n]))[ \\t]*(?:(?:then|do',
      _OG + "test_a_shift_in_a_one_line_case_arm_moves_the_arguments", "shift-in-case-arm"),
     ("tools/skyguard/writes.py", 'e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _plain_operands(e.argv)[:-1])) and (', 'True) and (',
@@ -12252,5 +12252,47 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="opus2-" + name)
      "tests/test_mod_install.py::test_mo2_update_does_not_keep_a_file_the_last_install_wrote_unchanged", "install-shipped-not-kept"),
     ("setup.sh", '    if [ "$CARRIED_HAND_EDITED" = 1 ] && [ -n "${!true_name+x}" ]; then recorded="${!true_name}"; fi\n', '',
      _OT + "test_a_path_corrected_by_hand_in_3x_survives_every_re_run", "setup-hand-corrected-3x"),
+]]
+
+
+# Python the guard cannot parse: one revert per clause of the read-only test.
+_UP = "tests/test_review_v4_unparsed_python.py::"
+_UPC = _UP + "test_unreadable_code_that_can_change_something_is_refused"
+MUTATIONS += [pytest.param("tools/skyguard/writes.py", anchor, replacement, test, id="unparsed-" + name)
+              for anchor, replacement, test, name in [
+    ('        if not _unparsed_may_change_files(code):\n            return []\n', '',
+     _UP + "test_unreadable_code_that_only_reads_names_no_target", "read-only-passes"),
+    ('    text = _READ_OPEN.sub(" ", code)\n', '    text = code\n',
+     _UP + "test_unreadable_code_that_only_reads_names_no_target", "plain-read-open-passes"),
+    ('    if "$" in _STRING.sub(" ", code):\n', '    if False:\n', _UPC + "[print($X)]", "shell-variable"),
+    (' or frm == "os" or "*" in what', ' or "*" in what', _UPC + "[from os import remove; remove('a')]", "from-os"),
+    ('    r\"\"\"\\bopen\\b\"\"\"   ', '    r\"\"\"\\bnever_open\\b\"\"\"   ', _UPC + "[open('a', 'w')]", "open-left-over"),
+    ('    r\"\"\"|\\bos\\s*\\.\\s*(?!(?:\"\"\" + _OS_READS + r\"\"\")\\b)\"\"\"\n', '', _UPC + "[os.remove('a')]", "os-call"),
+    ('|modules|builtins)', ')', _UPC + "[sys.modules['os'].remove('a')]", "modules"),
+    ('    r\"\"\"|\\$\\(|`\"\"\")', '    r\"\"\"\"\"\")', _UPC + "[print('$(rm x)')]", "shell-command"),
+    ('    if re.search(r"\\b(?:Path|pathlib)\\b", text) and ".replace(" in text:', '    if False:',
+     _UPC + "[from pathlib import Path; Path('a').replace('b')]", "path-replace"),
+]]
+
+
+# The review of 35f8cd0: one revert per fix.
+_F35 = "tests/test_review_v4_35f8_fixes.py::"
+MUTATIONS += [pytest.param(path, anchor, replacement, test, id="f35-" + name) for path, anchor, replacement, test, name in [
+    ("tools/skyguard/writes.py", '_rsync_relative(e.argv) or e.program not in', 'e.program not in',
+     _F35 + "test_a_relative_rsync_into_the_settings_folder_needs_the_saves_approval", "rsync-relative"),
+    ("tools/skyguard/shellparse.py", '        if m.group("lead") != ")" or re.search(r"\\bcase\\b", body[:m.start()]):\n', '        if True:\n',
+     _F35 + "test_a_shift_after_a_closing_bracket_that_is_no_case_arm_moves_nothing", "shift-bracket-case-only"),
+    ("tools/skyguard/shellparse.py", '"-s", "--shell", "-w",\n', '"-s", "--shell", "-l", "--login", "-w",\n',
+     _F35 + "test_the_wrapped_command_is_read_past_its_options[runuser -l -c 'rm -rf Data' root]", "runuser-login-boolean"),
+    ("tools/skyguard/shellparse.py", '                    if p == "runuser" and (v[k].startswith("--command=") or re.fullmatch(r"-[lmpf]+c", v[k])):\n                        break\n', '',
+     _F35 + "test_the_wrapped_command_is_read_past_its_options[runuser -lc 'rm -rf Data' root]", "runuser-cluster"),
+    ("tools/skyguard/shellparse.py", '"--working-directory", "--on-active",', '"--working-directory",',
+     _F35 + "test_the_wrapped_command_is_read_past_its_options[systemd-run --on-active 5 rm -rf Data]", "systemd-on-active"),
+    ("tools/skyguard/shellparse.py", '        skip = a in ("-X", "-W", "--check-hash-based-pycs")\n', '',
+     _F35 + "test_python_with_an_option_value_still_reads_its_program_from_a_pipe", "reads-code-option-value"),
+    ("tools/migrate-3x.py", '    return not recorded or any(recorded.get(name) not in (None, value) for name, value in values.items())\n', '    return True\n',
+     _F35 + "test_a_path_counts_as_set_by_hand_only_when_the_record_does_not_say_setup_wrote_it", "hand-set-per-record"),
+    ("tools/mod-install.py", '(^|/)openanimationreplacer/(?!(?:.*/)?user\\.json$)")', '(^|/)openanimationreplacer/")',
+     _F35 + "test_oar_user_settings_are_not_treated_as_the_mods_data", "oar-user-json"),
 ]]
 
