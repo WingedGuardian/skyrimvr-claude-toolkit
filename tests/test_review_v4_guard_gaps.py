@@ -289,11 +289,19 @@ def test_literal_python_spellings_of_one_save_change_are_backed_up(box, code):
 
 
 @pytest.mark.parametrize("code", [
-    "from shutil import copy; copy('{B}/x', '{B}/Game/Data/X.esp')",
-    "import shutil; shutil.copy(src='{B}/x', dst='{B}/Game/Data/X.esp')",
     "from pathlib import Path as P; P('{B}/Game/Data/X.esp').write_bytes(b'')",
     "import pathlib as pl; pl.Path('{B}/Game/Data/X.esp').write_bytes(b'')",
     "from pathlib import *; Path('{B}/Game/Data/X.esp').write_bytes(b'')",
-], ids=["from-import", "keywords", "path-alias", "module-alias", "star-import"])
+], ids=["path-alias", "module-alias", "star-import"])
 def test_literal_python_spellings_of_a_plugin_write_are_seen(box, code):
     assert box('python -c "{}"'.format(code.format(B="$B"))).decision == "deny"
+
+
+@pytest.mark.parametrize("code", [
+    "from shutil import copy; copy('{B}/x', '{B}/Game/Data/X.esp')",
+    "import shutil; shutil.copy(src='{B}/x', dst='{B}/Game/Data/X.esp')",
+], ids=["from-import", "keywords"])
+def test_literal_python_copies_of_a_plugin_are_read_as_cp_is(box, code):
+    """Seen in every spelling, and judged as `cp` into Data is: advice, because copying a built plugin in is routine."""
+    v = box('python -c "{}"'.format(code.format(B="$B")))
+    assert v.decision == "allow" and "X.esp" in v.context, v

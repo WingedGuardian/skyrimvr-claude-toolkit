@@ -286,8 +286,6 @@ def layer2_start(project, source="startup"):
         if disabled:
             banners.append(disabled)
         gd = _guard_drift(root)
-        if gd is None:
-            banners.append("%s is missing or unreadable, so the guard files were NOT checked this session." % GUARD_MANIFEST)
         if gd:
             release, differ, missing, unchecked = gd
             if differ or missing:

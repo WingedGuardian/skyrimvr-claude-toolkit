@@ -150,6 +150,7 @@ def _build(root: Path, lock_it=True) -> Bed:
     lines = ['model = "x"', "", "[hooks.state]", ""]
     for k, h in ct.expected_entries(root / ".codex" / "hooks.json").items():
         lines += ["[hooks.state.'{}']".format(k), 'trusted_hash = "{}"'.format(h), ""]
+    lines += ["[projects.'{}']".format(Path(root).resolve()), 'trust_level = "trusted"', ""]
     b.cfg.write_text("\n".join(lines), encoding="utf-8")
     sessions = b.hb("codex") / "sessions"
     sessions.mkdir(parents=True)

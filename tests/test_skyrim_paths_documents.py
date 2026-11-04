@@ -10,6 +10,7 @@ skyrim_paths = importlib.import_module("skyrim_paths")
 
 def test_the_recorded_documents_folder_wins(tmp_path, monkeypatch):
     game = tmp_path / "OneDrive" / "Dokumente" / "My Games" / "Skyrim VR"
+    game.mkdir(parents=True)
     monkeypatch.setenv("SKYRIM_DOCUMENTS_DIR", game.as_posix())
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "profile"))
     assert skyrim_paths.my_games() == game.parent

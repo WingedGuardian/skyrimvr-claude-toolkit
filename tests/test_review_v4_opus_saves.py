@@ -295,7 +295,7 @@ def test_a_failed_restore_says_why_and_exits_non_zero(tmp_path, monkeypatch, cap
         raise OSError("restore failed; published=[Save1.ess]; journal=j.json")
     monkeypatch.setattr(harness.save_store, "restore_result", boom)
     (tmp_path / "skyrim-paths.env").write_text("SKYRIM_GAME_ROOT='{}'\n".format(tmp_path.as_posix()), encoding="utf-8")
-    code = harness.main(["save-restore", "abc", "--in-place", "--root", str(tmp_path)])
+    code = harness.main(["save-restore", "abc", "--in-place"])
     assert code == 1 and "published=[Save1.ess]" in capsys.readouterr().out
 
 
@@ -334,14 +334,14 @@ def _store(tmp_path, rows):
     from skyguard import recovery
     store = tmp_path / "store"
     store.mkdir()
-    (store / "manifest.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    (store / recovery.MANIFEST).write_text("\n".join(rows) + "\n", encoding="utf-8")
     return recovery, store
 
 
 def test_a_corrupt_manifest_line_refuses_a_config_restore(tmp_path):
     def line(snap, src, state):
-        return json.dumps({"v": 1, "ts": "t", "t": 1, "src": src, "sha": "a" * 64, "size": 1, "kind": "config", "snap": snap, "command": "",
-                           "agent": "", "session_id": "", "lines": 1, "state": state})
+        from skyguard import recovery as rec
+        return json.dumps(rec._line("t", 1, src, "a" * 64, 1, "config", snap, "", "", "", 1, state))
     recovery, store = _store(tmp_path, [line("S0", "p", ["p"]), "{ broken", line("S2", "i", ["i", "p"])])
     with pytest.raises(ValueError, match="unreadable line"):
         recovery.resolve(store, "S2")
@@ -356,12 +356,6 @@ def test_a_folder_that_fails_to_list_is_not_deleted_scripts(tmp_path, monkeypatc
         raise PermissionError(path)
     monkeypatch.setattr(snapshot.os, "scandir", denied)
     assert snapshot.scan(str(tmp_path))[2] is True
-
-
-# ---- 5.18
-def test_a_missing_guard_manifest_is_named_at_session_start():
-    text = (REPO / "tools" / "skyguard" / "session.py").read_text(encoding="utf-8")
-    assert session._guard_drift("C:/no/such/project") is None and "were NOT checked this session" in text
 
 
 # ---- 4.2

@@ -510,7 +510,7 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
                         shutil.copy2(str(src_old), str(dest))
                 for dest in extra:
                     print("  KEPT {} (your config; the new archive does not hold it)".format(triage.clean(str(dest))))
-                    header.append("# KEPT: {}  {}".format(sha(dest), dest))
+                    header += ["# KEPT: {}  {}".format(sha(dest), dest)]
 
             bad = 0
             for done, p in enumerate(todo, 1):

@@ -490,7 +490,7 @@ def test_a_failed_migration_is_said_and_setup_carries_on(game_dir):
     """Exit 1 from migrate-3x (a copy or write failed): loud, never fatal to the rest of setup."""
     (game_dir / "tools" / "migrate-3x.py").write_text("import sys\nprint('boom')\nsys.exit(1)\n", encoding="utf-8")
     r = run_setup(game_dir)
-    assert r.returncode == 0
+    assert r.returncode == 1 and "Setup INCOMPLETE" in r.stdout, "the rest ran, but the upgrade did not do what it says"
     assert "The 3.x migration reported a problem (exit 1" in r.stdout and configured(game_dir, "CLAUDE.md")
 
 
