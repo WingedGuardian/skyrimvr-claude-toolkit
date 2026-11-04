@@ -62,20 +62,6 @@ def test_a_changed_test_file_selects_only_itself_by_reference(tmp_path):
     assert g.referencing_tests(["tests/test_b.py"], test_dir=tests) == []
 
 
-def test_a_large_changed_file_set_is_split_into_parallel_chunks_not_refused():
-    """A peer's 177-file branch timed the one changed-file process out at its 900 s cap (2026-11-01): a time-budget
-    refusal, not a test failure. More files mean more processes; every file still runs exactly once."""
-    g = _gate()
-    assert g.rest_chunks([]) == []
-    assert g.rest_chunks(["a"]) == [["a"]]
-    files = ["t%02d" % i for i in range(30)]
-    chunks = g.rest_chunks(files)
-    assert len(chunks) == 5, [len(c) for c in chunks]
-    assert sorted(f for c in chunks for f in c) == files           # each file once, none dropped
-    assert max(len(c) for c in chunks) - min(len(c) for c in chunks) <= 1   # balanced
-    assert len(g.rest_chunks(files[:7])) == 2
-
-
 def test_a_tree_without_the_twin_selector_leaves_twins_to_ci(monkeypatch, capsys):
     """A listing over the cap means the selector was ignored: running it would be four copies of the whole table."""
     g = _gate()
@@ -93,13 +79,80 @@ def test_a_tree_without_the_twin_selector_leaves_twins_to_ci(monkeypatch, capsys
     assert len(g.twin_steps("py", "", ["tools/x.py"])) == 4
 
 
-def test_chunks_are_balanced_by_file_size_not_position(tmp_path, monkeypatch):
-    g = _gate()
-    monkeypatch.setattr(g, "REPO", tmp_path)
-    for name, size in (("big", 900), ("a", 100), ("b", 100), ("c", 100), ("d", 100), ("e", 100), ("f", 100), ("g", 100)):
-        (tmp_path / name).write_bytes(b"x" * size)
-    chunks = g.rest_chunks(["big", "a", "b", "c", "d", "e", "f", "g"], per_chunk=4, max_chunks=2)
-    assert sorted(len(c) for c in chunks) == [1, 7] and ["big"] in chunks
+class _Pool:
+    """A fake clock and fake processes: real ones take over a second to start here, so real-time order was a flake. A step's command
+    is [name, ticks]; it finishes after that many ticks of the clock, and None never does."""
+
+    def __init__(self, g, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+        self.now, self.running, self.peak, self.ended = 0, 0, 0, []
+        pool = self
+
+        class Proc:
+            def __init__(self, cmd, **_kwargs):
+                self.name, ticks = cmd
+                self.until = None if ticks is None else pool.now + ticks
+                pool.running += 1
+                pool.peak = max(pool.peak, pool.running)
+                self.done = False
+
+            def _finish(self):
+                if not self.done:
+                    self.done = True
+                    pool.running -= 1
+                    pool.ended.append(self.name)
+
+            def poll(self):
+                if self.until is not None and pool.now >= self.until:
+                    self._finish()
+                    return 0
+                return None
+
+            def kill(self):
+                self._finish()
+
+            def wait(self):
+                return -9
+
+        monkeypatch.setattr(g, "REPO", tmp_path)
+        monkeypatch.setattr(g.subprocess, "Popen", Proc)
+        monkeypatch.setattr(g, "time", SimpleNamespace(time=lambda: pool.now, sleep=lambda _s: setattr(pool, "now", pool.now + 1)))
+        self.gate = g.Gate(sys.executable)
+
+
+def _pool(tmp_path, monkeypatch):
+    return _Pool(_gate(), tmp_path, monkeypatch)
+
+
+def test_the_pool_runs_every_step_and_never_more_than_its_workers(tmp_path, monkeypatch):
+    pool = _pool(tmp_path, monkeypatch)
+    pool.gate.parallel([("s{}".format(i), ["s{}".format(i), 2], 60) for i in range(5)], workers=2)
+    assert sorted(pool.ended) == ["s0", "s1", "s2", "s3", "s4"] and pool.peak == 2 and not pool.gate.failed
+
+
+def test_no_worker_limit_runs_everything_at_once(tmp_path, monkeypatch):
+    pool = _pool(tmp_path, monkeypatch)
+    pool.gate.parallel([("s{}".format(i), ["s{}".format(i), 2], 60) for i in range(3)])
+    assert pool.peak == 3
+
+
+def test_a_slow_step_does_not_hold_up_the_others(tmp_path, monkeypatch):
+    """What fixed chunks got wrong: the short steps finish on the free worker while one long step runs."""
+    pool = _pool(tmp_path, monkeypatch)
+    pool.gate.parallel([("slow", ["slow", 50], 60)] + [("q{}".format(i), ["q{}".format(i), 1], 60) for i in range(3)], workers=2)
+    assert pool.ended == ["q0", "q1", "q2", "slow"] and pool.now < 55
+
+
+def test_a_step_times_out_from_when_it_starts_not_from_when_the_pool_did(tmp_path, monkeypatch):
+    pool = _pool(tmp_path, monkeypatch)
+    pool.gate.parallel([("first", ["first", 10], 60), ("second", ["second", 2], 5)], workers=1)
+    assert not pool.gate.failed and pool.ended == ["first", "second"]
+
+
+def test_a_hung_step_fails_by_name_and_the_pool_goes_on(tmp_path, monkeypatch):
+    pool = _pool(tmp_path, monkeypatch)
+    pool.gate.parallel([("hung", ["hung", None], 3), ("after", ["after", 1], 60)], workers=1)
+    assert pool.gate.failed == ["hung"] and pool.ended == ["hung", "after"]
 
 
 def test_the_real_batch_that_turned_ci_red_is_now_selected():

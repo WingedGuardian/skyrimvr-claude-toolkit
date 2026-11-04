@@ -10735,6 +10735,12 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      "tests/test_prepush_gate.py::test_a_tree_without_the_twin_selector_leaves_twins_to_ci", "gate-leaves-unselected-twins-to-ci"),
     # v4.0.0 line-by-line review, guard gaps: one twin per clause.
     # v4.0.0 line-by-line review, tools.
+    ('scripts/prepush-gate.py', 'sum(p[5] is None for p in procs) < limit:', 'True:',
+     'tests/test_prepush_gate.py::test_the_pool_runs_every_step_and_never_more_than_its_workers', 'gate-pool-holds-its-workers'),
+    ('scripts/prepush-gate.py', '                              time.time() + timeout, None])\n', '                              t + timeout, None])\n',
+     'tests/test_prepush_gate.py::test_a_step_times_out_from_when_it_starts_not_from_when_the_pool_did', 'gate-pool-timeout-from-start'),
+    ('scripts/prepush-gate.py', '        limit = workers or len(steps) or 1\n', '        limit = 1\n',
+     'tests/test_prepush_gate.py::test_the_pool_runs_every_step_and_never_more_than_its_workers', 'gate-pool-uses-its-workers'),
     ('tools/esp_records.py', '        if depth > MAX_GROUP_DEPTH:\n', '        if False:\n',
      'tests/test_review_v4_sonnet_tools.py::test_deep_grups_are_a_plugin_error_not_a_recursion_error', 'esp-group-depth-limit'),
     ('tools/housekeep_backups.py', '            _retire(doc, dest, approved_sha256, gone)\n', '            pass\n',

@@ -200,29 +200,6 @@ def twin_steps(py, base, changed, processes=4, per_process=50):
              dict(env, SKYGUARD_MUTATION_SHARD="{}/{}".format(k + 1, n))) for k in range(n)]
 
 
-def rest_chunks(files, per_chunk=6, max_chunks=5):
-    """Split the changed-file/sentinel test files into chunks: one per `per_chunk` files, at most `max_chunks` (with the
-    three named groups, the policy's eight test workers), each run as its own process under its own time cap. Every file
-    lands in exactly one chunk, biggest first into the lightest, since a test file's size roughly follows its cost: by
-    position alone one chunk drew 1,380 tests and reached 70% in the 20-minute cap (2026-11-03)."""
-    files = list(files)
-    if not files:
-        return []
-    n = min(max_chunks, max(1, -(-len(files) // per_chunk)))
-
-    def size(name):
-        try:
-            return (REPO / name).stat().st_size
-        except OSError:
-            return 0
-    chunks, loads = [[] for _ in range(n)], [0] * n
-    for name in sorted(files, key=size, reverse=True):
-        k = min(range(n), key=lambda i: (loads[i], len(chunks[i])))
-        chunks[k].append(name)
-        loads[k] += size(name)
-    return chunks
-
-
 class Gate:
     def __init__(self, py):
         self.py = py
@@ -263,18 +240,24 @@ class Gate:
         return ok
 
 
-    def parallel(self, steps):
-        """Run several steps at once, each to its own log with its own timeout; report each as step() would."""
+    def parallel(self, steps, workers=None):
+        """Run steps at once, at most `workers` at a time, each to its own log and under its own timeout from when it starts; report
+        each as step() would. A free worker takes the next step, so nothing has to predict what a step costs."""
         t = time.time()
+        steps = list(steps)
+        limit = workers or len(steps) or 1
         procs = []
-        for k, (name, cmd, timeout, *env) in enumerate(steps):
-            print("== {} (parallel)".format(name), flush=True)
-            log = REPO / ".pytest_cache" / "prepush-gate-{}.log".format(k)
-            log.parent.mkdir(exist_ok=True)
-            fh = open(log, "w", encoding="utf-8", errors="replace")
-            procs.append([name, subprocess.Popen(cmd, cwd=REPO, env=env[0] if env else None, stdout=fh, stderr=subprocess.STDOUT), fh, log,
-                          time.time() + timeout, None])
-        while any(p[5] is None for p in procs):
+        waiting = 0
+        while waiting < len(steps) or any(p[5] is None for p in procs):
+            while waiting < len(steps) and sum(p[5] is None for p in procs) < limit:
+                name, cmd, timeout, *env = steps[waiting]
+                print("== {} (parallel)".format(name), flush=True)
+                log = REPO / ".pytest_cache" / "prepush-gate-{}.log".format(waiting)
+                log.parent.mkdir(exist_ok=True)
+                fh = open(log, "w", encoding="utf-8", errors="replace")
+                procs.append([name, subprocess.Popen(cmd, cwd=REPO, env=env[0] if env else None, stdout=fh, stderr=subprocess.STDOUT), fh, log,
+                              time.time() + timeout, None])
+                waiting += 1
             for p in procs:
                 if p[5] is not None:
                     continue
@@ -375,16 +358,13 @@ def main(argv=None) -> int:
               ("rule messages", [f for f in files if f == "tests/test_rule_messages.py"], 1200)]
     rest = [f for f in files if f not in TIMING_SENTINELS
             and f not in ("tests/test_guard_corpus.py", "tests/test_rule_messages.py")]
-    # The changed-file set grows with the branch (177 changed files on a peer's branch timed this group out at 900 s
-    # on 2026-11-01: a time-budget refusal, not a test failure) and with reference selection. A big branch gets more
-    # processes, not a refusal: round-robin chunks, each under its own cap.
-    # 1200 like the corpus groups: a 19-file chunk of the 28-file housekeep merge was killed at 98% after 900 s
-    # (2026-11-01). The cap catches a hang; it must not refuse a merely large push.
-    # 1800, not 1200: a shared-core re-pin selects most of the suite, and the chunk holding setup, housekeep and shell reached 77% of
-    # 1,520 tests at 1200 s, twice, with no test hung (2026-11-03). File size cannot see which tests start real processes.
-    groups += [("sentinels and changed-file tests {}/{}".format(k + 1, len(chunks)), chunk, 1800)
-               for chunks in [rest_chunks(rest)] for k, chunk in enumerate(chunks)]
-    g.parallel([(name + " ({} files)".format(len(fs)), verbose + fs, t) for name, fs, t in groups if fs])
+    # The changed-file set grows with the branch (177 files on a peer's branch; a shared-core re-pin selects most of the suite). One
+    # process per file, up to the policy's eight workers: fixed chunks had to guess each file's cost beforehand, and by file size one
+    # chunk drew the slow tests and reached 79% in 30 minutes, three pushes running, while the others idled from minute 8 (2026-11-03).
+    # The cap catches a hang in one file; it must not refuse a merely large push.
+    steps = [(name + " ({} files)".format(len(fs)), verbose + fs, cap) for name, fs, cap in groups if fs]
+    steps += [(name, verbose + [name], 1200) for name in rest]
+    g.parallel(steps, workers=8)
     if not g.failed:
         twins = twin_steps(py, base, changed)
         if twins:
