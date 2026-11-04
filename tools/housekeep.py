@@ -807,10 +807,19 @@ def manifest_references(cfg):
                     if "backups" in Path(dp).relative_to(root).parts:
                         continue
                     raise ValueError("unknown manual-install manifest format: " + name)
-                text = path.read_text(encoding="utf-8-sig")
+                # A whole mod folder kept by `mod-install --update` is payload, whatever its files are called: a mod's
+                # own manifest.json, or a config in another encoding, turned staging cleanup off for good.
+                if "mod-folder" in Path(dp).relative_to(root).parts:
+                    continue
+                in_backups = root == TOOLKIT_ROOT / ".claude/backups/manual-installs" or "backups" in Path(dp).relative_to(root).parts
+                try:
+                    text = path.read_text(encoding="utf-8-sig")
+                except UnicodeDecodeError:
+                    if in_backups and path.suffix.lower() == ".json":
+                        continue
+                    raise ValueError("unreadable manual-install manifest: " + name) from None
                 if path.suffix.lower() == ".json":
                     # Backup configs are payloads unless their name or top-level shape claims a manifest.
-                    in_backups = root == TOOLKIT_ROOT / ".claude/backups/manual-installs" or "backups" in Path(dp).relative_to(root).parts
                     named_manifest = name.lower() in ("manifest.json", "rollback.json") or name.lower().endswith(".manifest.json")
                     try:
                         document = json.loads(text)

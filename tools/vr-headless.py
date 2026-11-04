@@ -215,14 +215,17 @@ def steamvr_folder(steam: Path) -> Path:
 
 
 def steamvr_running() -> bool:
+    """SteamVR or the game is running, or that cannot be told. Under OpenComposite the game runs with no vrserver."""
     if os.name != "nt":
         return False
     try:
-        r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq vrserver.exe", "/NH"], capture_output=True, text=True,
-                           timeout=30)
+        r = subprocess.run(["tasklist", "/NH", "/FO", "CSV"], capture_output=True, text=True, errors="replace", timeout=30)
     except (OSError, subprocess.TimeoutExpired):
-        return True                     # unknown is never absent: treat it as running, which only holds restoration
-    return "vrserver.exe" in r.stdout.lower()
+        return True                     # unknown is never absent: `on` holds until it can tell
+    if r.returncode != 0 or not r.stdout.strip():
+        return True                     # a tasklist that failed says nothing either
+    low = r.stdout.lower()
+    return "vrserver.exe" in low or "skyrimvr.exe" in low
 
 
 def paths():
@@ -744,7 +747,8 @@ def cmd_on(force=False, park=False) -> int:
         if not p[k].is_file():
             raise Refused("{} not found: {}".format(k.replace("_", " "), p[k]))
     if steamvr_running() and not force:
-        raise Refused("SteamVR is running; it rewrites steamvr.vrsettings when it exits. Close it, then run `on` again "
+        raise Refused("SteamVR or the game is running (or tasklist could not tell); SteamVR rewrites steamvr.vrsettings when it "
+                      "exits. Close it, then run `on` again "
                       "(--force to proceed anyway).")
     if already_headless(json.loads(p["vrsettings"].read_text(encoding="utf-8"))):
         raise Refused("{} already forces or enables the null driver, so `off` would restore a headless setup. Put "

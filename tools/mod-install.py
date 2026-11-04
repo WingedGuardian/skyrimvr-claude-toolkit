@@ -118,6 +118,9 @@ def name_problem(name: str) -> str:
     return ""
 
 
+KEPT_CONFIG_SUFFIXES = (".ini", ".toml", ".yaml", ".yml", ".cfg", ".json")
+
+
 def records_dir() -> Path:
     override = os.environ.get("SKYRIM_MANUAL_INSTALLS")
     return Path(override) if override else skyrim_paths.TOOLKIT_ROOT / ".claude" / "backups" / "manual-installs"
@@ -127,9 +130,13 @@ def mo2_mods() -> str:
     """SKYRIM_MO2_MODS from the environment or skyrim-paths.env ("" when not configured)."""
     from skyguard import paths as sg_paths
     try:
-        return sg_paths.read_install(str(skyrim_paths.TOOLKIT_ROOT), os.environ).first("SKYRIM_MO2_MODS")
+        config = sg_paths.read_install(str(skyrim_paths.TOOLKIT_ROOT), os.environ)
     except (OSError, ValueError):
         return ""
+    if any(key == "SKYRIM_MO2_MODS" for _file, key in config.malformed):
+        # Not "no MO2": falling back would install into the game's Data folder instead of a mod folder.
+        raise SystemExit("ERROR: SKYRIM_MO2_MODS in skyrim-paths.env is not a usable absolute path. Fix it, then run this again.")
+    return config.first("SKYRIM_MO2_MODS")
 
 
 def write_replacing(src: Path, target: Path) -> None:
@@ -488,13 +495,22 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
             if old_folder is not None:
                 replacing.mkdir(parents=True, exist_ok=True)
                 # The user's configs stay (the archive's copy goes beside them as .new), and so does MO2's meta.ini.
-                keep = [q[1] for q in todo if q[2] == "CONFIG-NEW"]
+                # A config the archive does not hold stays too: the mod or the user made it, and an update must not
+                # return the mod to its defaults. A game-root config (--game-root-files) never left its folder.
+                keep = [q[1] for q in todo if q[2] == "CONFIG-NEW" and replacing in q[1].parents]
                 keep += [replacing / n for n in CARRY_OVER if not any(q[1] == replacing / n for q in todo)]
-                for dest in keep:
+                planned_here = {q[1] for q in todo}
+                extra = [replacing / f.relative_to(old_folder) for f in old_folder.rglob("*")
+                         if f.is_file() and f.suffix.lower() in KEPT_CONFIG_SUFFIXES
+                         and replacing / f.relative_to(old_folder) not in planned_here]
+                for dest in keep + extra:
                     src_old = old_folder / dest.relative_to(replacing)
                     if src_old.is_file():
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(str(src_old), str(dest))
+                for dest in extra:
+                    print("  KEPT {} (your config; the new archive does not hold it)".format(triage.clean(str(dest))))
+                    header.append("# KEPT: {}  {}".format(sha(dest), dest))
 
             bad = 0
             for done, p in enumerate(todo, 1):

@@ -571,3 +571,26 @@ def test_a_relative_data_folder_still_writes_absolute_manifest_rows(tmp_path, se
     manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
     rows = [l for l in manifest.splitlines() if l and not l.startswith("#")]
     assert rows and all(os.path.isabs(r.split("	")[-1].split("  ")[-1]) for r in rows), manifest
+
+
+def test_mo2_update_keeps_a_config_the_archive_does_not_hold(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    (old / "MCM" / "Settings").mkdir(parents=True)
+    (old / "MCM" / "Settings" / "Example.ini").write_bytes(b"made in game\n")
+    r = run(archive(tmp_path, ENTRIES), "--update", "--apply", env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (old / "MCM" / "Settings" / "Example.ini").read_bytes() == b"made in game\n"
+    assert "KEPT" in line(r.stdout, "Example.ini"), r.stdout
+    assert not (old / "Stale.dll").exists(), "only configs carry over"
+
+
+def test_mo2_update_with_a_game_root_config_does_not_stop_after_moving_the_old_folder(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    (game / "enblocal.ini").write_bytes(b"mine\n")
+    entries = ENTRIES + [{"path": "Root/enblocal.ini", "data": "theirs\n"}]
+    r = run(archive(tmp_path, entries), "--update", "--apply", "--game-root-files",
+            env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
+    assert r.returncode == 0 and "Traceback" not in r.stderr, r.stdout + r.stderr
+    assert (old / "ExampleMod.esp").read_bytes() == b"new plugin"
+    assert (game / "enblocal.ini").read_bytes() == b"mine\n"
+

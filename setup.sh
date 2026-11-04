@@ -496,7 +496,12 @@ fi
 # "Dokumente – Müller" folder arrived as cp437 bytes, landed in skyrim-paths.env, and the guard's UTF-8 reader
 # refused every command (MEASURED, Plan 8 T7 review C1). This spelling emits UTF-8 with no BOM (MEASURED).
 DOCUMENTS_DIR=$(powershell -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Environment]::GetFolderPath('MyDocuments')" 2>/dev/null | tr -d '\r')
-[ -z "$DOCUMENTS_DIR" ] && DOCUMENTS_DIR="C:/Users/$USERNAME/Documents"
+if [ -z "$DOCUMENTS_DIR" ]; then
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*) DOCUMENTS_DIR="C:/Users/$USERNAME/Documents" ;;
+        *) DOCUMENTS_DIR="$HOME/Documents" ;;
+    esac
+fi
 # Normalize backslashes to forward slashes -- via tr, not bash's ${var//\\//}, which was
 # unreliable across the bash builds we tested (Cygwin bash silently no-ops on it).
 # $LOCALAPPDATA is backslash-delimited on every Windows install, and feeding a raw backslash
@@ -658,6 +663,8 @@ fi
 echo ""
 echo "Configuring safety hooks..."
 HOOKS_MISSING=0
+HOOKS_MISSING_CLAUDE=0
+HOOKS_MISSING_CODEX=0
 # The Codex entries (.codex/hooks/) take the same interpreter. The .sh holds it as PY='...' like the Claude
 # hooks; the .ps1 as $PY = '...' with PowerShell's own quote escaping (PY_PS above).
 for hook in .claude/hooks/protect-bash.sh .claude/hooks/protect-files.sh .claude/hooks/protect-mcp.sh \
@@ -674,6 +681,10 @@ for hook in .claude/hooks/protect-bash.sh .claude/hooks/protect-files.sh .claude
     if [ ! -f "$GAME_DIR/$hook" ]; then
         echo "  MISSING: $hook -- this hook is NOT installed and will never run"
         HOOKS_MISSING=$((HOOKS_MISSING + 1))
+        case "$hook" in
+            .codex/*) HOOKS_MISSING_CODEX=$((HOOKS_MISSING_CODEX + 1)) ;;
+            *) HOOKS_MISSING_CLAUDE=$((HOOKS_MISSING_CLAUDE + 1)) ;;
+        esac
     elif grep -q '{{PYTHON_PATH}}' "$GAME_DIR/$hook"; then
         if [ -n "$PYTHON_PATH" ]; then
             sed -i "s|{{PYTHON_PATH}}|$H_SED|g" "$GAME_DIR/$hook"
@@ -847,7 +858,16 @@ DETECTED_LINES=""
 keep_hand_set() {  # $1 = key in skyrim-paths.env, $2 = detected value -> prints the value to use; notes go to stderr
     local v="" was="" seen=""
     if [ -f "$PATHS_ENV" ]; then
-        v=$(sed -n "s/^$1=['\"]\(.*\)['\"]\$/\1/p" "$PATHS_ENV" | tail -n 1)
+        # What the guard's reader takes: `export`, no quotes, CRLF. A hand edit in those spellings was dropped silently.
+        v=$(tr -d '\r' < "$PATHS_ENV" | sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?$1=//p")
+        if [ "$(printf '%s\n' "$v" | grep -c .)" -gt 1 ]; then
+            echo "  !! $1 is set more than once in skyrim-paths.env; only the last one is kept." >&2
+        fi
+        v=$(printf '%s\n' "$v" | tail -n 1)
+        case "$v" in
+            \'*\') v=${v:1:${#v}-2} ;;
+            \"*\") v=${v:1:${#v}-2} ;;
+        esac
         v=${v//"'\\''"/"'"}
         seen=$(grep -c "^# detected $1=" "$PATHS_ENV")
         was=$(sed -n "s/^# detected $1=['\"]\(.*\)['\"]\$/\1/p" "$PATHS_ENV" | tail -n 1)
@@ -862,6 +882,9 @@ keep_hand_set() {  # $1 = key in skyrim-paths.env, $2 = detected value -> prints
         fi
         printf '%s' "$v"
     else
+        if test "$seen" = 1 && test "$v" != "$was" && test -n "$v" && test ! -d "$v" && test "${SKYRIM_PREFER_DETECTED:-0}" != 1; then
+            echo "  !! $1: the path you set by hand is not a folder here ($v), so it is not used; using ${2:-nothing}." >&2
+        fi
         printf '%s' "$2"
     fi
 }
@@ -920,6 +943,11 @@ else
     if [ "$_want" = "$_got" ] && [ "$_grc" = 0 ] && [ "$_want" = "$_guard" ]; then
         echo "  Wrote: skyrim-paths.env"
         retire_3x_paths
+        # Carried once. It is in skyrim-paths.env now, as what this run found; left in place, an old profile that still
+        # exists would beat detection on every later run and leave the current one unguarded.
+        if [ -f "$MIG_ENV" ]; then
+            mv -f "$MIG_ENV" "$MIG_ENV.used" 2>/dev/null || true
+        fi
     else
         PATHS_BAD=1
         echo ""
@@ -1080,6 +1108,10 @@ MMEOF
     echo "  Configured with your paths (Skyrim folder: $SKYRIM_FOLDER)."
 else
     echo "  Already configured."
+    if [ -n "$CONFIG_DIR" ] && ! grep -qF "$CONFIG_DIR" "$GAME_DIR/$DOC"; then
+        echo "  !! $DOC still names older folders: the guard follows skyrim-paths.env ($CONFIG_DIR), but this file was"
+        echo "  !! filled in once. Tell your agent the current folder, or re-extract $DOC and re-run setup."
+    fi
 fi
 done
 
@@ -1219,13 +1251,46 @@ if [ -f "$GAME_DIR/CLAUDE.md" ] && ! grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/CLAU
 AGENTS_DOC_STATE="not configured"
 if [ -f "$GAME_DIR/AGENTS.md" ] && ! grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/AGENTS.md"; then AGENTS_DOC_STATE="configured"; fi
 
+# What this run could not do. The banner, the agent lines and the exit status must agree: an agent gating on the exit
+# code reported a 3.x upgrade or a lost hook as a success (review 2026-11-04).
+SETUP_PROBLEMS=""
+if [ "$HOOKS_MISSING" != 0 ]; then
+    SETUP_PROBLEMS="$SETUP_PROBLEMS  - $HOOKS_MISSING hook file(s) are missing (see MISSING above). Re-extract the toolkit zip."$'\n'
+fi
+SETTINGS_OK=1
+if [ ! -f "$GAME_DIR/.claude/settings.json" ]; then
+    SETTINGS_OK=""
+elif [ -n "$PY_FOUND" ] && ! MSYS_NO_PATHCONV=1 $PY_FOUND -B -c "import json,sys; json.load(open(sys.argv[1],encoding='utf-8'))" "$PY_ROOT/.claude/settings.json" >/dev/null 2>&1; then
+    SETTINGS_OK=""
+fi
+if [ -z "$SETTINGS_OK" ]; then
+    SETUP_PROBLEMS="$SETUP_PROBLEMS  - .claude/settings.json is missing or not valid JSON, so Claude Code loads no hooks. Re-extract the toolkit zip."$'\n'
+fi
+if [ -z "$PATHS_OK" ]; then
+    SETUP_PROBLEMS="$SETUP_PROBLEMS  - skyrim-paths.env could not be written, so the configured folders outside this one are not guarded."$'\n'
+fi
+if [ "${MIG_RC:-0}" != 0 ]; then
+    SETUP_PROBLEMS="$SETUP_PROBLEMS  - The 3.x migration failed (exit $MIG_RC, above), so your 3.x edits were not carried; they are in .claude/backups/."$'\n'
+fi
+if [ "$HOOKS_MISSING_CLAUDE" != 0 ] || [ -z "$SETTINGS_OK" ]; then CLAUDE_STATE="incomplete"; fi
+if [ "$HOOKS_MISSING_CODEX" != 0 ] && [ "$CODEX_STATE" = "configured" ]; then CODEX_STATE="incomplete"; fi
+
 echo ""
 echo "============================================"
-echo " Setup Complete!"
+if [ -n "$SETUP_PROBLEMS" ]; then
+    echo " Setup INCOMPLETE"
+else
+    echo " Setup Complete!"
+fi
 echo "============================================"
 echo ""
+if [ -n "$SETUP_PROBLEMS" ]; then
+    printf '%s\n' "$SETUP_PROBLEMS"
+fi
 echo "Agents in this folder:"
-if [ "$CLAUDE_STATE" = "configured" ]; then
+if [ "$CLAUDE_STATE" = "incomplete" ]; then
+    echo "  Claude Code: INCOMPLETE -- its hooks or settings are missing (above), so it is NOT guarded."
+elif [ "$CLAUDE_STATE" = "configured" ]; then
     echo "  Claude Code: CONFIGURED -- CLAUDE.md has your paths; its configured hooks judge recognized calls once loaded."
 else
     echo "  Claude Code: NOT CONFIGURED -- CLAUDE.md has no paths filled in (this run: --agent $AGENT_SEL)."
@@ -1326,6 +1391,9 @@ echo "You're ready to go! Start your agent in this folder and ask it about your 
 # --agent codex names Codex alone: Codex left unconfigured means the run did nothing it was asked for.
 # --lock asked for the lock: a lock that did not apply is said above and reported here too.
 SETUP_RC=0
+if [ -n "$SETUP_PROBLEMS" ]; then
+    SETUP_RC=1
+fi
 if [ -n "$DO_PORTABLE" ] || [ -n "$DO_OPENCODE" ]; then
     echo ""
     echo "Neutral runtime: tools/agent-harness.py (capabilities, check, coverage, save-list, save-restore)."

@@ -394,8 +394,13 @@ def pick_source(root: Path, from_dir):
         s = _set_from_dir(_label(str(from_dir)), from_dir)
         return s if s.era() == "3" else None
     cands = [_set_from_dir(LIVE, root)]
-    snap = _newest(list((root / ".claude" / "backups").glob("pre-update-*")))
-    if snap:
+    # Newest first, every one: a second snapshot taken after the extract is 4.x and must not hide the 3.x one.
+    snaps = list((root / ".claude" / "backups").glob("pre-update-*"))
+    while snaps:
+        snap = _newest(snaps)
+        if snap is None:
+            break
+        snaps.remove(snap)
         cands.append(_set_from_dir(snap.relative_to(root).as_posix(), snap))
     kb = _kb_store_set(root)
     if kb:
@@ -628,7 +633,8 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
     known = json.loads(KNOWN_FILE.read_text(encoding="utf-8"))
     src = pick_source(root, from_dir)
     if src is None:
-        out("migrate-3x: no 3.x files found (this install is already 4.x, or --from holds none) -- nothing to do.")
+        out("migrate-3x: no 3.x files found -- nothing to do. On a fresh 4.x install that is all this means. If you just "
+            "extracted over a 3.x install with no pre-update snapshot, edits made before the extract were not kept here.")
         return 0
     out("migrate-3x: reading the 3.x files from " + src.label)
     if src.label == LIVE and from_dir is None:

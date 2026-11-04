@@ -46,7 +46,9 @@ def my_games() -> Path:
     """The root Bethesda writes under: Documents/My Games, where Documents can be redirected (OneDrive, a moved or
     localized folder), so a leftover <profile>/Documents does not win. Recorded by setup, else as Windows reports it."""
     recorded = os.environ.get("SKYRIM_DOCUMENTS_DIR") or _recorded_documents()
-    if recorded:
+    # A game folder that still exists: a moved Documents leaves a stale record, and a hand-set `.../Documents` has no game
+    # folder at its end, so its parent is not My Games.
+    if recorded and Path(recorded).is_dir() and Path(recorded).name.lower().startswith("skyrim"):
         return Path(recorded).parent
     profile = os.environ.get("USERPROFILE") or os.path.expanduser("~")
     real_profile = _windows_folder(0x28)            # CSIDL_PROFILE: a test's fake profile keeps its own Documents

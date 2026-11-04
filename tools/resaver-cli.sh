@@ -17,7 +17,7 @@
 #   clean      <save> <out.ess> [--undefined] [--unattached] [--terminate-threads] [--apply]
 #                                 dry-run unless --apply; writes to a NEW file + handles .skse (no backup of its own: the native backend's --apply takes one, and a guarded agent session does)
 #   changeform <save> <refidHex> [--raw] [--depth N]   parse ONE changeform body; --raw adds changeflags+hex/base64
-#   --- ReSaver-DELEGATED write ops (dry-run unless --apply; VERIFY-GATED: re-read==model or delete+fail) ---
+#   --- ReSaver-DELEGATED write ops (dry-run unless --apply; VERIFY-GATED: re-read==model, or fail and keep the candidate) ---
 #   reset-havok       <save> [<out.ess>] [--apply]     ESS.resetHavok — clear REFR havok-move data
 #   cleanse-formlists <save> [<out.ess>] [--apply]     ESS.cleanseFormLists — strip null FLST entries
 #   remove-created    <save> [<out.ess>] [--apply]     ESS.removeNonexistentCreated — drop orphaned created-form instances

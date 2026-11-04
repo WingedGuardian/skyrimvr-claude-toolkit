@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,8 @@ import zipfile
 
 from . import ARCHIVE_SHA256, ARCHIVE_URL, BACKEND_RUNTIME, Refusal, UPSTREAM_VERSION
 from .files import backup, contained, json_write, sha
+
+_MO2_PATH_KEYS = frozenset(("selected_profile", "gamepath", "base_directory", "profiles_directory", "mod_directory", "overwrite_directory"))
 
 
 def install_archive(archive, dest):
@@ -126,6 +129,27 @@ def unregister(config, agents):
     return removed
 
 
+def mo2_values(text):
+    """ModOrganizer.ini's values by lower-case key. MO2 writes its paths with doubled backslashes, often in @ByteArray()
+    (setup.sh decodes the same). An escape or a variant in a path key is refused; one in an unrelated key, such as a window
+    geometry, does not matter."""
+    import configparser
+    ini = configparser.ConfigParser(interpolation=None, strict=False)
+    ini.read_string(text)
+    values = {}
+    for section in ini.values():
+        for key, value in section.items():
+            value = value.strip().strip('"')
+            if value.startswith("@ByteArray(") and value.endswith(")"):
+                value = value[len("@ByteArray("):-1]
+            if key.casefold() in _MO2_PATH_KEYS:
+                if value.startswith("@") or re.search(r"(?<!\\)\\x[0-9A-Fa-f]{2}", value):
+                    raise Refusal("Unsupported MO2 QSettings encoding for " + key + "; resolve the path explicitly.")
+                value = value.replace("\\\\", "\\")
+            values[key.casefold()] = value
+    return values
+
+
 def setup(args):
     root = Path(args.root).resolve()
     state = root / ".skyguard/housecarl"
@@ -158,19 +182,8 @@ def setup(args):
               "server_hashes": hashes, "xelib_root": str(Path(args.xelib_root or root).resolve()),
               "node": shutil.which("node") or "node"}
     if args.mo2_instance:
-        import configparser
-        ini = configparser.ConfigParser(interpolation=None, strict=False)
         instance = Path(args.mo2_instance).resolve()
-        ini.read_string((instance / "ModOrganizer.ini").read_text(encoding="utf-8-sig"))
-        values = {}
-        for section in ini.values():
-            for key, value in section.items():
-                value = value.strip().strip('"')
-                if value.startswith("@ByteArray(") and value.endswith(")"):
-                    value = value[len("@ByteArray("):-1]
-                if value.startswith("@") or "\\\\" in value or "\\x" in value:
-                    raise Refusal("Unsupported MO2 QSettings encoding for " + key + "; resolve the path explicitly.")
-                values[key.casefold()] = value
+        values = mo2_values((instance / "ModOrganizer.ini").read_text(encoding="utf-8-sig"))
         if not values.get("selected_profile") or not values.get("gamepath"):
             raise Refusal("MO2 instance lacks selected_profile or gamePath; no fallback profile is chosen.")
         base = Path(values.get("base_directory", str(instance)))

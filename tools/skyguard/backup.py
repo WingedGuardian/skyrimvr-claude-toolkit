@@ -387,6 +387,8 @@ def _restore_refusal(target):
         low = [x.lower() for x in parts]
         if low and low[-1].endswith(_RESTORE_NEVER_EXT):
             return "a plugin or archive"
+        if low and low[-1].endswith((".ess", ".skse")):
+            return "one half of a save pair, with no backup of the other half (use: tools/skyguard.sh snapshot restore)"
         if self_rules.text_kind(p) or (low and low[-1] == "guard-files.sha256"):
             return "one of the guard's own files"
         if any(":" in x for x in parts[1:]):

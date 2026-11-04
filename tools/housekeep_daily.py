@@ -45,8 +45,15 @@ CODE_FILES = ("housekeep.py", "housekeep_archive.py", "housekeep_daily.py", "hou
 def running_games(names):
     if sys.platform != "win32":
         return []
-    out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True,
-                         **housekeep.NO_WINDOW).stdout.lower()
+    # A tasklist that fails or hangs cannot say the game is closed: treat them all as running, and the cleanup waits.
+    try:
+        got = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True, errors="replace", timeout=60,
+                             **housekeep.NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return list(names)
+    if got.returncode != 0 or not got.stdout.strip():
+        return list(names)
+    out = got.stdout.lower()
     return [g for g in names if '"{}"'.format(g.lower()) in out]
 
 
@@ -108,7 +115,8 @@ def announcement(cfg, now=None) -> str:
         return ("HOUSEKEEP: housekeep's code changed since you approved it, so today's run only PLANS (nothing is "
                 "removed or archived). When it finishes, review {} and approve it.".format(f(cfg, "REVIEW")))
     return ("HOUSEKEEP: today's cleanup (toolkit housekeep, approved version {}) starts now in the background -- low "
-            "priority, no windows, at most {} min. It archives finished work to {} and applies your approved plan; "
+            "priority, no windows, at most {} min. It archives finished work to {} and applies a plan made just now by the "
+            "code version you approved (you approved the code, not this list); "
             "nothing in use, no saves. Summary at the next session start; log: {}.".format(
                 cfg["approved_sha256"][:8], cfg["daily_minutes"], cfg["archive_root"], f(cfg, "LOG")))
 
@@ -184,7 +192,8 @@ def run(cfg, dry=False, now=None) -> str:
             # Keep the previous review receipt: approval does not prove its notes obsolete.
             if not dry and doc["actions"]:
                 done = housekeep.apply(doc, cfg, deadline=now + cfg["daily_minutes"] * 60, summary=True)
-    write_alerts(doc, cfg)
+    if not dry:                     # the docstring's "plan and report only": a dry run must not move the growth baseline
+        write_alerts(doc, cfg)
     if not ok:
         summary = "today's run only PLANNED ({} actions, {:.1f} GiB) because the code changed; review {}".format(
             len(doc["actions"]), sum(a["bytes"] for a in doc["actions"]) / GIB, f(cfg, "REVIEW"))
