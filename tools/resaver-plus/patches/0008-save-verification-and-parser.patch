@@ -1,5 +1,5 @@
 diff --git a/src/core/Save.cpp b/src/core/Save.cpp
-index 45b14f5..ce93a3a 100644
+index 45b14f5..36d9aaf 100644
 --- a/src/core/Save.cpp
 +++ b/src/core/Save.cpp
 @@ -1,5 +1,6 @@
@@ -130,7 +130,7 @@ index 45b14f5..ce93a3a 100644
  			}
  			if (hadCo) {
  				res.cosaveBackup = co;
-@@ -569,24 +594,35 @@ namespace ess
+@@ -569,31 +594,47 @@ namespace ess
  					cleanup();
  					throw std::runtime_error("could not back up " + co.filename().string() + " (" + ec.message() + "); nothing was changed");
  				}
@@ -172,8 +172,9 @@ index 45b14f5..ce93a3a 100644
  					restored = std::filesystem::remove(a_path, e2) && !e2;
  				}
  				cleanup();
-@@ -594,6 +630,11 @@ namespace ess
- 										 (restored ? "the save was put back as it was" : "the save could not be put back: restore it from its .bak copy"));
+ 				throw std::runtime_error("could not write the co-save " + co.filename().string() + " (" + why + "); " +
+-										 (restored ? "the save was put back as it was" : "the save could not be put back: restore it from its .bak copy"));
++										 (restored ? "the save was put back as it was" : "the save could not be put back: its copy is in the stage folder beside it"));
  			}
  		}
 +		// Successful new publication leaves staging hard links to the same verified

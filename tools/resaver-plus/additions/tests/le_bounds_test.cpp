@@ -26,6 +26,17 @@ void Roundtrip(bool le, const std::function<void(Papyrus&)>& populate, const cha
 }
 }
 int main() {
+    {   // A crafted variant-of-variant chain ran the stack out; it is a format error now, at a depth no save uses.
+        std::vector<std::uint8_t> chain(100000, static_cast<std::uint8_t>(VType::kVariant));
+        bool refused = false;
+        try {
+            Reader r(chain.data(), chain.size());
+            Variable::read(r);
+        } catch (const std::exception&) {
+            refused = true;
+        }
+        Check(refused, "a deep variant chain is refused, not a stack overflow");
+    }
     for (bool le : {false, true}) {
         {
             SaveFile s; s.header.version = le ? 8 : 12;

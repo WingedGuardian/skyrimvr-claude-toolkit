@@ -98,6 +98,8 @@ class Fake:
         self.calls.append(cmd)
         if "config" in cmd:
             return 0, self.crlf + "\n"
+        if "info" in cmd:                       # the built program, asked to read a save that does not exist
+            return getattr(self, "smoke", (1, '{"ok":false,"error":"cannot open"}'))
         return self.ctest
 
     def ran(self, word):

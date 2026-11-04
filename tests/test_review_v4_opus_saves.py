@@ -342,9 +342,9 @@ def test_a_corrupt_manifest_line_refuses_a_config_restore(tmp_path):
     def line(snap, src, state):
         from skyguard import recovery as rec
         return json.dumps(rec._line("t", 1, src, "a" * 64, 1, "config", snap, "", "", "", 1, state))
-    recovery, store = _store(tmp_path, [line("S0", "p", ["p"]), "{ broken", line("S2", "i", ["i", "p"])])
+    recovery, store = _store(tmp_path, [line("20260101_000000-config", "p", ["p"]), "{ broken", line("20260103_000000-config", "i", ["i", "p"])])
     with pytest.raises(ValueError, match="unreadable line"):
-        recovery.resolve(store, "S2")
+        recovery.resolve(store, "20260103_000000-config")
 
 
 # ---- 5.13

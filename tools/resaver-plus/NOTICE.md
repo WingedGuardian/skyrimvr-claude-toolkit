@@ -58,7 +58,7 @@ What the patches change:
 |---|---|
 | 0001 | CTest and probe targets; shell32 link for the command-line tool's UTF-8 arguments |
 | 0002 | Structured JSON command-line entry; UTF-8 wide-argument dispatch |
-| 0003 | Decoder corrections: extra-data type 16, FollowerSwimBreadcrumbs (135), QUST instances / run-data 0, counted SayToTopicInfo (113); a limit of 16 on extra-data nesting; per-decode diagnostics |
+| 0003 | Decoder corrections: extra-data type 16, relabelled SayToTopicInfo (113) fields; a limit of 16 on extra-data nesting; per-decode diagnostics |
 | 0004 | Per-decode diagnostics |
 | 0005, 0006 | Batched reverse-reference lookup; combined advisory analysis |
 | 0007 | Papyrus counts are bounds-checked before allocation, with the widths of the save's own game edition |

@@ -105,7 +105,26 @@ def build_info():
             info.get("upstream_commit"), UPSTREAM_COMMIT))
     if info.get("executable") != EXECUTABLE or not isinstance(info.get("sha256"), str):
         raise Refused("BUILD-INFO.json does not name the pinned executable")
+    # An updated toolkit can change the patches under the same upstream pin: the old binary lacks those fixes.
+    built, current = info.get("patch_set_sha256"), _patch_set()
+    if built and current and built != current:
+        raise Refused("this build was made from older patches than this toolkit ships: rebuild with build.py")
     return folder, info
+
+
+def _patch_set():
+    """The hash build.py records for the patches and additions here, or "" when they are not beside this file."""
+    source = Path(__file__).resolve().parent / "resaver-plus" / "build.py"
+    if not source.is_file():
+        return ""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("resaver_plus_build", str(source))
+    build = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(build)
+        return build.patch_set_hash(build.patch_files())
+    except (OSError, ValueError, ImportError, AttributeError):
+        return ""
 
 
 def executable():

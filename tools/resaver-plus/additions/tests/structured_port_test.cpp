@@ -164,6 +164,54 @@ int main(){
         auto gained=Run("changeform-diff",fewer,{"second","--quests"},&full);
         Check(gained.o.at("added").a.size()==1&&gained.o.at("removed").a.empty(),"native quest diff names a quest only the second save has");
     }
+    {   // The Opus review of v4.0.0.
+        auto sample=Make();bool refused=false;
+        try{Edit("set-global",sample,Parse("set-global",{"05000123","99.5"}));}catch(const std::exception&){refused=true;}
+        Check(refused,"a bare id with another plugin's byte does not edit this global");
+        auto named=Make();Edit("set-global",named,Parse("set-global",{"01000123","99.5"}));
+        Check(Run("dump",named,{"globals"}).o.at("items").a[0].o.at("value").n==99.5,"a bare id with its own byte edits it");
+        auto low=Make();Edit("set-global",low,Parse("set-global",{"000123","99.5"}));
+        Check(Run("dump",low,{"globals"}).o.at("items").a[0].o.at("value").n==99.5,"a bare low id still matches");
+    }
+    {
+        auto flagged=Make();flagged.problems.push_back("layout does not add up");
+        auto j=Run("info",flagged);
+        Check(j.o.at("parseProblems").n==1&&j.o.at("parseProblemSamples").a.size()==1,"a read says what the parser flagged");
+        auto clean=Make();Check(!Run("info",clean).o.count("parseProblems"),"a clean read does not mention problems");
+    }
+    {
+        auto a=Make();a.formIDs={0x01000123,0x01000456};auto b=Make();b.formIDs={0x01000456,0x01000123};
+        ChangeForm qa;qa.refID.data=1;qa.typeField=a.changeForms[0].typeField;qa.changeFlags=1;Writer w;w.u8(1);cf::SetBody(qa,w.buf);
+        auto qb=qa;qb.refID.data=2;
+        a.changeForms={qa};b.changeForms={qb};
+        Check(Run("changeform-diff",a,{"second","--quests"},&b).o.at("added").a.empty(),"the same form under another table index is the same quest");
+        auto c=Make();c.formIDs={0x01000456,0x01000123};c.changeForms={qa};
+        auto moved=Run("changeform-diff",a,{"second","--quests"},&c);
+        Check(moved.o.at("added").a.size()==1&&moved.o.at("removed").a.size()==1,"the same index naming another form is another quest");
+        auto one=Run("changeform-diff",a,{"second","00000123"},&c);
+        Check(!one.o.at("found").b||one.o.at("diff").o.count("refid"),"a single-form diff does not pair unrelated forms silently");
+    }
+    {
+        auto sample=Make();bool refused=false;
+        try{Run("dump",sample,{"activescripts","--script","absent"});}catch(const std::exception&){refused=true;}
+        Check(refused,"a filter the subsystem cannot apply is refused");
+        Check(Run("dump",sample,{"scriptinstances","--script","absent"}).o.at("items").a.empty(),"a filter it can apply still works");
+    }
+    {
+        auto sample=Make();auto hits=Run("find",sample,{"e"}).o.at("hits").a;bool script=false;
+        for(const auto& h:hits)script=script||h.o.at("kind").s=="script";
+        Check(script,"hex-valid text still finds a script by name");
+    }
+    {
+        auto sample=Make();bool refused=false;
+        try{Edit("set-var",sample,Parse("set-var",{"ABCDEF1234567890","0","5","--type","int"}));}catch(const std::exception&){refused=true;}
+        Check(refused,"--type does not overwrite a reference with a primitive");
+    }
+    {
+        auto sample=Make();SuspendedStack lost;lost.id=1;sample.papyrus()->suspended1.push_back(lost);
+        auto j=Run("writer-scan",sample);
+        Check(!j.o.at("complete").b&&j.o.at("unreadEntries").n==1,"writer-scan says what it could not read");
+    }
     Reject("set-var",{"1","0","true","--apply"},"apply requires explicit output");
     Reject("clean",{"a","b"},"multiple outputs rejected");
     Reject("verify-roundtrip",{"--apply"},"roundtrip query cannot publish");

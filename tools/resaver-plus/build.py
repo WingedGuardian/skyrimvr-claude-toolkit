@@ -69,7 +69,7 @@ class BuildError(Exception):
 def run(cmd, cwd=None, env=None, timeout=3600):
     """One checked step. Every external program goes through here (the tests replace it)."""
     r = subprocess.run([str(c) for c in cmd], cwd=None if cwd is None else str(cwd), env=env, capture_output=True,
-                       text=True, timeout=timeout)
+                       text=True, errors="replace", timeout=timeout)
     if r.returncode != 0:
         raise BuildError("{} failed: {}".format(" ".join(map(str, cmd[:4])), (r.stderr or r.stdout).strip()[-600:]))
     return r.stdout.strip()
@@ -78,7 +78,7 @@ def run(cmd, cwd=None, env=None, timeout=3600):
 def run_result(cmd, cwd=None, timeout=3600):
     """A step whose failure is decided by the caller (CTest's summary)."""
     r = subprocess.run([str(c) for c in cmd], cwd=None if cwd is None else str(cwd), capture_output=True, text=True,
-                       timeout=timeout)
+                       errors="replace", timeout=timeout)
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
@@ -217,9 +217,11 @@ def fetch(repo: str, commit: str, dest: Path) -> None:
         if code != 0 or conversion.strip().lower() != "false":
             raise BuildError("source cache converts line endings (core.autocrlf is not false); its bytes are not the "
                              "pinned ones. Use a fresh --work directory: {}".format(dest))
-        dirty = run([*GIT, "-C", dest, "status", "--porcelain", "--untracked-files=all"])
+        # --ignored: an ignored file is copied and compiled like any other.
+        dirty = run([*GIT, "-C", dest, "status", "--porcelain", "--untracked-files=all", "--ignored"])
         if dirty:
-            raise BuildError("source cache has local changes; preserve them before building: {}".format(dest))
+            raise BuildError("source cache has local changes (or an earlier download was interrupted); preserve anything "
+                             "you need, then use a new --work folder: {}".format(dest))
         head = run([*GIT, "-C", dest, "rev-parse", "HEAD"])
         verify_head(head, commit, repo)
         return
@@ -238,11 +240,16 @@ def remove_owned_builds(work: Path) -> list:
     for tree in sorted(Path(work).glob("owned-build-*")):
         marker = tree / ".toolkit-build-owner.json"
         try:
-            ours = json.loads(marker.read_text(encoding="utf-8")).get("builder") == "tools/resaver-plus/build.py"
+            data = json.loads(marker.read_text(encoding="utf-8"))
+            ours = isinstance(data, dict) and data.get("builder") == "tools/resaver-plus/build.py"
         except (OSError, ValueError):
             ours = False                                   # not declared by this builder: left alone
         if ours and tree.is_dir() and not tree.is_symlink():
-            shutil.rmtree(tree)
+            try:
+                shutil.rmtree(tree)
+            except OSError as e:                           # a scanner holding a file: tidiness, never a failed build
+                print("note: could not remove the old build tree {} ({}); it is safe to delete".format(tree, e), file=sys.stderr)
+                continue
             removed.append(tree)
     return removed
 
@@ -343,11 +350,24 @@ def compiler_info(out: Path, configure_text: str) -> dict:
     return info
 
 
+def smoke_cli(exe: Path, owned: Path) -> None:
+    """Run the built program once: asked to read a save that does not exist, it must answer with a refusal in its own
+    words, not crash and not claim success. No test target launches it."""
+    code, text = run_result([exe, "info", owned / "no-such-save.ess"])
+    if code == 0 or code < 0 or code > 255 or not text.strip():
+        raise BuildError("the built {} did not refuse a missing save cleanly (exit {}): {}".format(EXECUTABLE, code, text[:300]))
+
+
 def install(executable: Path, info: dict, dest: Path = None) -> Path:
     """Rotate any previous build aside (never delete it), then install the executable and, LAST, BUILD-INFO.json: a
     crash between the two leaves no BUILD-INFO, and the adapter refuses to run without one."""
     dest = Path(dest or BUILD)
     dest.mkdir(parents=True, exist_ok=True)
+    # Copied and checked first: a full disk or a bad copy must leave the working build where it is.
+    tmp = dest / (EXECUTABLE + ".installing")
+    shutil.copyfile(str(executable), str(tmp))
+    if sha(tmp) != info["sha256"]:
+        raise BuildError("the installed copy differs from the tested executable")
     old = [dest / EXECUTABLE, dest / "BUILD-INFO.json"]
     if any(p.exists() for p in old):
         keep = dest / "previous" / "{}-{}".format(time.strftime("%Y%m%d-%H%M%S"), os.getpid())
@@ -355,10 +375,6 @@ def install(executable: Path, info: dict, dest: Path = None) -> Path:
         for p in old:
             if p.exists():
                 os.replace(str(p), str(keep / p.name))
-    tmp = dest / (EXECUTABLE + ".installing")
-    shutil.copyfile(str(executable), str(tmp))
-    if sha(tmp) != info["sha256"]:
-        raise BuildError("the installed copy differs from the tested executable")
     os.replace(str(tmp), str(dest / EXECUTABLE))
     meta = dest / "BUILD-INFO.json.installing"
     meta.write_text(json.dumps(info, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -401,6 +417,7 @@ def build(work: Path, jobs: int = 1, dest: Path = None, keep_build: bool = False
     exe = out / "Release" / EXECUTABLE
     if not exe.is_file():
         raise BuildError("the build reported success but produced no " + EXECUTABLE)
+    smoke_cli(exe, owned)
     info = {"schema": 1, "upstream_repo": UPSTREAM_REPO, "upstream_version": UPSTREAM_VERSION,
             "upstream_commit": UPSTREAM_COMMIT, "patches": len(patches), "additions": len(additions),
             "patch_set_sha256": patch_set_hash(patches), "source_sha256": hashes, "gui": False,
@@ -424,7 +441,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         info = build(args.work.resolve(), args.jobs, args.install.resolve(), args.keep_build)
-    except (BuildError, OSError, subprocess.SubprocessError) as e:
+    except (BuildError, OSError, subprocess.SubprocessError, ValueError) as e:
         print("ERROR: {}".format(e), file=sys.stderr)
         return 2
     differs = [k for k in ("msvc", "cmake") if not str(info["tools"].get(k, "")).startswith(TESTED[k].split("-")[0])]

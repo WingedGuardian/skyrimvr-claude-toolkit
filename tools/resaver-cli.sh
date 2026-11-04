@@ -21,7 +21,7 @@
 #   reset-havok       <save> [<out.ess>] [--apply]     ESS.resetHavok — clear REFR havok-move data
 #   cleanse-formlists <save> [<out.ess>] [--apply]     ESS.cleanseFormLists — strip null FLST entries
 #   remove-created    <save> [<out.ess>] [--apply]     ESS.removeNonexistentCreated — drop orphaned created-form instances
-#   verify-roundtrip  <save>                           safety self-test: write+re-read+compare, report identical (temp discarded)
+#   verify-roundtrip  <save>                           safety self-test: serialize+re-parse the parsed model and compare, report identical (compares the model, not the file's bytes)
 #   --- READ diagnostics ---
 #   extradata-scan    <save> [--limit N] [--type ACHR|REFR]   tally unknown extra-data types (REFR=trustworthy)
 #   changeform-diff   <saveA> <saveB> [refidHex|--quests]     structured+raw-tail diff; noise-labeled; refid candidates

@@ -1,8 +1,30 @@
 diff --git a/src/core/Papyrus.cpp b/src/core/Papyrus.cpp
-index 8a52d45..3004681 100644
+index 8a52d45..0a42350 100644
 --- a/src/core/Papyrus.cpp
 +++ b/src/core/Papyrus.cpp
-@@ -112,9 +112,17 @@ namespace ess
+@@ -64,7 +64,20 @@ namespace ess
+ 			v.value = r.eid();
+ 			break;
+ 		case VType::kVariant:
+-			v.inner = std::make_unique<Variable>(Variable::read(r));
++			{
++				// A variant of a variant costs one byte, so a crafted save could nest until the stack ran out.
++				thread_local int depth = 0;
++				struct Level
++				{
++					int& d;
++					explicit Level(int& a_d) : d(a_d) { ++d; }
++					~Level() { --d; }
++				} level(depth);
++				if (depth > 16) {
++					throw FormatError("variant nested too deeply", r.pos());
++				}
++				v.inner = std::make_unique<Variable>(Variable::read(r));
++			}
+ 			break;
+ 		default:  // arrays
+ 			if (IsRefType(v.type)) {
+@@ -112,9 +125,17 @@ namespace ess
  
  	namespace
  	{
@@ -20,7 +42,7 @@ index 8a52d45..3004681 100644
  			v.reserve(n);
  			for (std::uint32_t i = 0; i < n; ++i) {
  				v.push_back(Variable::read(r));
-@@ -250,6 +258,7 @@ namespace ess
+@@ -250,6 +271,7 @@ namespace ess
  				f.locals.push_back(m);
  			}
  			const auto oc = r.u16();
@@ -28,7 +50,7 @@ index 8a52d45..3004681 100644
  			f.code.reserve(oc);
  			for (std::uint16_t i = 0; i < oc; ++i) {
  				f.code.push_back(ReadOpcode(r));
-@@ -356,6 +365,7 @@ namespace ess
+@@ -356,6 +378,7 @@ namespace ess
  			if (count > 100000) {
  				throw FormatError("invalid stack frame count", r.pos());
  			}
@@ -36,7 +58,7 @@ index 8a52d45..3004681 100644
  			d.frames.reserve(count);
  			for (std::uint32_t i = 0; i < count; ++i) {
  				d.frames.push_back(ReadFrame(r));
-@@ -414,6 +424,7 @@ namespace ess
+@@ -414,6 +437,7 @@ namespace ess
  		{
  			std::vector<SuspendedStack> v;
  			const auto                  n = r.u32();
@@ -44,7 +66,7 @@ index 8a52d45..3004681 100644
  			v.reserve(n);
  			for (std::uint32_t i = 0; i < n; ++i) {
  				SuspendedStack s;
-@@ -476,18 +487,21 @@ namespace ess
+@@ -476,18 +500,21 @@ namespace ess
  		} else {
  			strCount = r.u32();
  		}
@@ -66,7 +88,7 @@ index 8a52d45..3004681 100644
  			s.members.reserve(mc);
  			for (std::uint32_t m = 0; m < mc; ++m) {
  				MemberDesc d;
-@@ -499,6 +513,7 @@ namespace ess
+@@ -499,6 +526,7 @@ namespace ess
  		}
  
  		const auto instCount = r.u32();
@@ -74,7 +96,7 @@ index 8a52d45..3004681 100644
  		instances.reserve(instCount);
  		for (std::uint32_t i = 0; i < instCount; ++i) {
  			ScriptInstance s;
-@@ -512,6 +527,7 @@ namespace ess
+@@ -512,6 +540,7 @@ namespace ess
  		}
  
  		const auto refCount = r.u32();
@@ -82,7 +104,7 @@ index 8a52d45..3004681 100644
  		references.reserve(refCount);
  		for (std::uint32_t i = 0; i < refCount; ++i) {
  			Reference x;
-@@ -521,6 +537,7 @@ namespace ess
+@@ -521,6 +550,7 @@ namespace ess
  		}
  
  		const auto arrCount = r.u32();
@@ -90,7 +112,7 @@ index 8a52d45..3004681 100644
  		arrays.reserve(arrCount);
  		for (std::uint32_t i = 0; i < arrCount; ++i) {
  			ArrayInfo a;
-@@ -536,6 +553,7 @@ namespace ess
+@@ -536,6 +566,7 @@ namespace ess
  		runtime = r.u32();
  
  		const auto activeCount = r.u32();
@@ -98,7 +120,7 @@ index 8a52d45..3004681 100644
  		activeScripts.reserve(activeCount);
  		for (std::uint32_t i = 0; i < activeCount; ++i) {
  			ActiveScript a;
-@@ -615,6 +633,7 @@ namespace ess
+@@ -615,6 +646,7 @@ namespace ess
  		}
  
  		const auto fmCount = r.u32();
@@ -106,7 +128,7 @@ index 8a52d45..3004681 100644
  		functionMessages.reserve(fmCount);
  		for (std::uint32_t i = 0; i < fmCount; ++i) {
  			FunctionMessage m;
-@@ -637,12 +656,14 @@ namespace ess
+@@ -637,12 +669,14 @@ namespace ess
  			unk2 = r.u32();
  		}
  		const auto unkCount = r.u32();
