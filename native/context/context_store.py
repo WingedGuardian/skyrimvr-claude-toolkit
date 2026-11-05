@@ -208,7 +208,12 @@ def slot_lock(path: Path):
 def slot_bytes(raw: bytes, slots, owner: str, release: bool) -> bytes:
     """Byte-level so every other field stays exactly as written. Never steals. Taking needs an empty slot, so a slot this
     context did not take is never its to release. Releasing accepts an empty one: a crash around it must not strand recovery."""
-    value = json.loads(raw)
+    try:
+        value = json.loads(raw)
+    except ValueError as error:
+        raise Refused("the ownership file {} is unreadable".format(slots["file"])) from error
+    if not isinstance(value, dict):
+        raise Refused("the ownership file {} is unreadable".format(slots["file"]))
     allowed = (None, owner) if release else (None,)
     if any(key not in value or value[key] not in allowed for key in slots["keys"]):
         raise Refused("the runtime is held by another owner, or the ownership file lacks a slot")
@@ -221,13 +226,21 @@ def slot_bytes(raw: bytes, slots, owner: str, release: bool) -> bytes:
     return updated
 
 
+def read_slots(slots) -> bytes:
+    try:
+        return Path(slots["file"]).read_bytes()
+    except OSError as error:
+        raise Refused("cannot read the ownership file {}: {}".format(slots["file"], error)) from error
+
+
 def change_slots(slots, owner: str, release: bool = False) -> None:
     if not slots:
         return
     path = Path(slots["file"])
+    read_slots(slots)       # before creating a lock file beside a path that may be a typo
     # The lock every participant in this ownership file already uses; a different one would exclude nobody.
     with slot_lock(path.with_suffix(".gateway.lock")):
-        raw = path.read_bytes()
+        raw = read_slots(slots)
         updated = slot_bytes(raw, slots, owner, release)
         if updated != raw:
             write_durable(path, updated)
@@ -418,6 +431,9 @@ def check_request(game: Path, state: Path, store: Path, owner: str, run: str, pr
             raise Refused("root {} is the whole game or its Data folder: name the folders a test really changes".format(root))
         if not folder.is_dir():
             raise Refused("root {} is not a folder".format(root))
+        spelled = folder.relative_to(game).as_posix()
+        if actual_name(game, spelled) != spelled:
+            raise Refused("root {} is spelled {} on disk: use that spelling".format(spelled, actual_name(game, spelled)))
     if (state / run).exists():
         raise Refused("run {} already exists: run names are never reused".format(run))
 
@@ -431,7 +447,7 @@ def check(game, state, store, owner: str, run: str, profile: dict) -> dict:
         raise Refused("a context is already active: restore it first")
     slots = profile.get("slots")
     if slots:
-        slot_bytes(Path(slots["file"]).read_bytes(), slots, owner, False)
+        slot_bytes(read_slots(slots), slots, owner, False)
     files, _ = walk(game, profile["roots"])
     reject_saves(files)
     for relative in files:
@@ -541,7 +557,7 @@ def compare(game: Path, manifest: dict) -> dict:
             report["created"].append(relative)
     known_folders = {relative.lower() for relative in manifest["folders"]}
     report["missing_folders"] = [relative for relative in manifest["folders"] if not (game / relative).is_dir()]
-    report["renamed"] += [relative for relative in manifest["folders"] if (game / relative).is_dir() and actual_name(game, relative) != relative]
+    report["renamed"] += [relative for relative in manifest["folders"] if (game / relative).is_dir() and final_name(game / relative) != PurePosixPath(relative).name]
     report["renamed"].sort()
     report["created_folders"] = [relative for relative in folders if relative.lower() not in known_folders]
     return report
@@ -556,25 +572,29 @@ def same_file_other_case(game: Path, relative: str, by_lower: dict):
     return None
 
 
+def final_name(path: Path) -> str:
+    """How the last segment of a path is spelled on disk now."""
+    with os.scandir(path.parent) as entries:
+        names = [entry.name for entry in entries]
+    return next((name for name in names if name == path.name), None) or next((name for name in names if name.lower() == path.name.lower()), path.name)
+
+
 def actual_name(game: Path, relative: str) -> str:
-    """How the path is spelled on disk now."""
+    """The whole path as spelled on disk now. For checking a request; a restore only ever looks from the roots down."""
     current, parts = game, []
     for part in PurePosixPath(relative).parts:
-        with os.scandir(current) as entries:
-            names = [entry.name for entry in entries]
-        match = next((name for name in names if name == part), None) or next((name for name in names if name.lower() == part.lower()), part)
-        parts.append(match)
-        current = current / match
+        found = final_name(current / part)
+        parts.append(found)
+        current = current / found
     return "/".join(parts)
 
 
 def put_name_back(game: Path, relative: str) -> None:
-    """One path segment at a time: a renamed folder and a renamed file are the same repair."""
-    current = game
-    for wanted, found in zip(PurePosixPath(relative).parts, PurePosixPath(actual_name(game, relative)).parts):
-        if wanted != found:
-            os.rename(current / found, current / wanted)
-        current = current / wanted
+    """Only the last segment: every folder from a root down is its own entry, and anything above a root is not ours."""
+    path = game / relative
+    found = final_name(path)
+    if found != path.name:
+        os.rename(path.with_name(found), path)
 
 
 def require_this_game(game: Path, record: dict) -> None:
@@ -621,7 +641,7 @@ def remove_empty_new_folders(game: Path, manifest: dict) -> None:
 def require_slots_usable(slots, owner: str) -> None:
     """Before anything is restored: if someone else now holds the runtime, the live files may be theirs."""
     if slots:
-        slot_bytes(Path(slots["file"]).read_bytes(), slots, owner, True)
+        slot_bytes(read_slots(slots), slots, owner, True)
 
 
 def remove_addition(game: Path, row: dict, evidence: Path) -> None:

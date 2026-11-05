@@ -983,6 +983,54 @@ class ReviewFindings(Base):
         with self.assertRaisesRegex(tc.Refused, "save"):
             tc.check(self.game, self.state, self.store, OWNER, "r1", profile)
 
+    def test_a_root_spelled_differently_from_the_disk_is_refused(self):
+        profile = dict(self.profile, roots=["Data/n/config", "Data/N/data"], edits=[])
+        for call in (lambda: self.prepare(profile=profile), lambda: tc.check(self.game, self.state, self.store, OWNER, "r1", profile)):
+            with self.assertRaisesRegex(tc.Refused, "spelled"):
+                call()
+        self.assertEqual([p.name for p in (self.game / "Data").iterdir() if p.name.lower() == "n"], ["N"])
+
+    def test_a_case_rename_above_the_roots_is_left_alone(self):
+        self.prepare()
+        os.rename(self.game / "Data/N", self.game / "Data/n")
+        receipt = self.restore()
+        self.assertTrue(receipt["verified"], receipt)
+        self.assertEqual(receipt["renamed"], [])
+        self.assertEqual([p.name for p in (self.game / "Data").iterdir() if p.name.lower() == "n"], ["n"], "outside the roots is not ours")
+
+    def test_a_case_rename_of_a_root_comes_back(self):
+        self.prepare()
+        os.rename(self.game / "Data/N/data", self.game / "Data/N/DATA")
+        self.assertTrue(self.restore()["verified"])
+        self.assertIn("data", [p.name for p in (self.game / "Data/N").iterdir()])
+
+    def test_a_missing_ownership_file_refuses_and_leaves_nothing_active(self):
+        profile = dict(self.profile, slots={"file": str(self.status) + ".typo", "keys": ["shared"]})
+        for call in (lambda: self.prepare(profile=profile), lambda: tc.check(self.game, self.state, self.store, OWNER, "r1", profile)):
+            with self.assertRaisesRegex(tc.Refused, "ownership file"):
+                call()
+        self.assertIsNone(tc.status(self.state))
+        self.assertFalse((self.game / tc.GAME_MARKER).exists())
+
+    def test_a_corrupt_ownership_file_refuses_and_leaves_nothing_active(self):
+        for bad in (b"{not json", b"[]", b"3"):
+            self.status.write_bytes(bad)
+            with self.assertRaisesRegex(tc.Refused, "ownership file"):
+                self.prepare()
+            self.assertIsNone(tc.status(self.state))
+            self.assertFalse((self.game / tc.GAME_MARKER).exists())
+            self.assertEqual(self.status.read_bytes(), bad)
+
+    def test_a_lost_ownership_file_stops_restore_and_says_which(self):
+        self.prepare()
+        keep = self.status.read_bytes()
+        self.status.unlink()
+        with self.assertRaisesRegex(tc.Refused, "ownership file"):
+            self.restore()
+        self.assertEqual(self.config.read_bytes(), b"top:\n  enabled: false\n")
+        self.status.write_bytes(keep)
+        self.assertTrue(self.restore()["verified"])
+
     def test_prepare_records_a_receipt(self):
         self.prepare()
         receipt = json.loads((self.state / "r1" / tc.PREPARE_RECEIPT).read_text(encoding="utf-8"))
