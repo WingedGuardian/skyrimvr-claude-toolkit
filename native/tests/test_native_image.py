@@ -13,11 +13,13 @@ import native_image as ni  # noqa: E402
 
 TEXT_RVA, BIND_RVA, PDATA_RVA, UNWIND_RVA = 0x1000, 0x8000, 0x4000, 0x5000
 TOOL = {"name": "tool", "commit": "c" * 40, "sha256": "d" * 64, "source_sha256": ""}
+PRIMARY = UNWIND_RVA + 0x40
 
 
 def make_pe(entry=TEXT_RVA + 0x10, code=b"\x4c\x89\x4c\x24\x20\xc3" + b"\x90" * 0x1FA, base=0x140000000, image_size=0x9000):
     sections = [(b".text", TEXT_RVA, code, 0x60000020), (b".pdata", PDATA_RVA, struct.pack("<III", TEXT_RVA, TEXT_RVA + 0x40, UNWIND_RVA) +
-                b"\0" * 0x1F4, 0x40000040), (b".unw", UNWIND_RVA, bytes([1 | (4 << 3), 5, 3, 0]) + b"\0" * 0x1FC, 0x40000040),
+                b"\0" * 0x1F4, 0x40000040), (b".unw", UNWIND_RVA, (bytes([1 | (4 << 3), 5, 3, 0]) + b"\0" * 8 + struct.pack("<III", TEXT_RVA + 0x100, TEXT_RVA + 0x140, PRIMARY)).ljust(0x40, b"\0") +
+                 bytes([1, 0, 0, 0]), 0x40000040),
                 (b".bind", BIND_RVA, b"\xcc" * 0x200, 0x60000020)]
     header = 0x400
     pe = b"MZ" + b"\0" * 0x3A + struct.pack("<I", 0x80) + b"\0" * 0x40
@@ -85,6 +87,38 @@ class Register(Base):
         other.write_bytes(make_pe(entry=BIND_RVA + 0x20))
         with self.assertRaisesRegex(ni.Refused, "different source"):
             self.register(source=other)
+
+    def test_store_in_a_git_checkout_refuses(self):
+        (self.root / ".git").mkdir()
+        with self.assertRaisesRegex(ni.Refused, "git checkout"):
+            self.register()
+
+    def test_tool_identity_must_be_hex(self):
+        with self.assertRaisesRegex(ni.Refused, "tool commit"):
+            self.register(tool=dict(TOOL, commit="../x"))
+
+    def test_registering_over_a_damaged_entry_refuses(self):
+        digest = self.register()["image_sha256"]
+        stored = self.store / digest / ni.IMAGE
+        os.chmod(stored, stat.S_IWRITE)
+        stored.unlink()
+        with self.assertRaisesRegex(ni.Refused, "damaged"):
+            self.register()
+
+    def test_leftover_from_an_interrupted_registration_is_named(self):
+        (self.store / (".incoming-" + ni.sha256(self.image))).mkdir(parents=True)
+        with self.assertRaisesRegex(ni.Refused, "interrupted"):
+            self.register()
+
+    def test_truncated_file_refuses(self):
+        self.image.write_bytes(self.image.read_bytes()[:0x90])
+        with self.assertRaises(ni.Refused):
+            self.register()
+
+    def test_section_past_the_file_refuses(self):
+        self.image.write_bytes(self.image.read_bytes()[:0x500])
+        with self.assertRaisesRegex(ni.Refused, "past the end"):
+            self.register()
 
     def test_store_in_a_game_folder_refuses(self):
         (self.root / "SkyrimVR.exe").write_bytes(b"")
@@ -154,6 +188,16 @@ class Verify(Base):
         self.stored.unlink()
         self.assertIn("missing", ni.verify(self.store, self.digest)[0])
 
+    def test_edited_manifest_fails(self):
+        manifest = self.store / self.digest / ni.MANIFEST
+        os.chmod(manifest, stat.S_IWRITE)
+        manifest.write_text(manifest.read_text(encoding="utf-8").replace(ni.sha256(self.source), "0" * 64), encoding="utf-8")
+        self.assertIn("manifest", ni.verify(self.store, self.digest)[0])
+
+    def test_reference_must_be_a_hash(self):
+        with self.assertRaisesRegex(ni.Refused, "image reference"):
+            ni.verify(self.store, "../other")
+
     def test_installed_source_matches(self):
         self.assertEqual(ni.verify(self.store, self.digest, self.source), [])
 
@@ -188,6 +232,7 @@ class Inspect(Base):
         function = ni.inspect(self.store, self.digest, TEXT_RVA + 4, 1)["runtime_function"]
         self.assertEqual((function["begin"], function["end"], function["unwind_rva"]), (TEXT_RVA, TEXT_RVA + 0x40, UNWIND_RVA))
         self.assertTrue(function["chained"])
+        self.assertEqual(function["primary_begin"], TEXT_RVA + 0x100)
         self.assertEqual(function["prolog_size"], 5)
 
     def test_outside_any_function_has_no_entry(self):
@@ -213,6 +258,11 @@ class Inspect(Base):
         descriptor = {"sites": [{"name": "drive", "rva": hex(TEXT_RVA), "expected_hex": "4053554156"}]}
         self.assertIn("drive", ni.check_sites(self.store, self.digest, descriptor)[0])
 
+    def test_vacuous_site_refuses(self):
+        descriptor = {"sites": [{"name": "drive", "rva": hex(TEXT_RVA), "expected_hex": ""}]}
+        with self.assertRaisesRegex(ni.Refused, "at least"):
+            ni.check_sites(self.store, self.digest, descriptor)
+
     def test_empty_descriptor_refuses(self):
         with self.assertRaises(ni.Refused):
             ni.check_sites(self.store, self.digest, {"sites": []})
@@ -226,6 +276,12 @@ class Cli(Base):
     def test_verify_reports_through_json(self):
         digest = self.register()["image_sha256"]
         self.assertEqual(ni.main(["verify", "--store", str(self.store), "--sha256", digest]), 0)
+
+    def test_bad_descriptor_file_is_a_refusal_not_a_drift(self):
+        digest = self.register()["image_sha256"]
+        bad = self.root / "bad.json"
+        bad.write_text("{", encoding="utf-8")
+        self.assertEqual(ni.main(["check", "--store", str(self.store), "--sha256", digest, "--descriptor", str(bad)]), 2)
 
     def test_verify_fails_when_tampered(self):
         digest = self.register()["image_sha256"]

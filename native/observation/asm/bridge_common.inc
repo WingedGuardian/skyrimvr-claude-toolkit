@@ -11,6 +11,12 @@ EXTERN SkyrimNativeXStateMask:QWORD
 ;   4200 R11, 4208 R10, 4210 RAX, 4218 flags, 4220 RBP, 4228 caller.
 ; RBP remains the unwind frame pointer across calls. Bind only body/API-qualified
 ; originals that do not consume incoming RBP; restore the caller's RBP on return.
+; Stack arguments are NOT forwarded: the original's fifth argument would read this
+; frame. Bind only sites with 4 or fewer register arguments and no varargs.
+; The observer must be noexcept and must not fault: an escaping exception in phase 0
+; unwinds through here and the original never runs. The packet is reloaded into the
+; registers afterwards, so a passive observer must treat it as read-only.
+; Each call uses about 17 KB of stack.
 
 SAVE_XSTATE MACRO
     mov r10,[rsp+0B0h]

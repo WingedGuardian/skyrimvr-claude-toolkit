@@ -51,3 +51,6 @@ tools/resaver-plus/backend
 # Session charters: each session's first prompt, goal and open items (private, per install).
 .agent-sessions/
 tools/resaver-cli/.compiled/
+# Native SDK working folders and image stores never belong here; the store refuses a git checkout too.
+native/**/image.bin
+*.unpacked.exe

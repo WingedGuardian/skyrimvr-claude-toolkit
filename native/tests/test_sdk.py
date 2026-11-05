@@ -56,7 +56,11 @@ class Receipt(unittest.TestCase):
         (self.prefix / "lib").mkdir(parents=True)
         (self.prefix / "lib" / "a.lib").write_bytes(b"one")
         self.pins = Path(self.tmp.name) / "pins.json"
-        self.pins.write_text("{}", encoding="utf-8")
+        self.pin_data = {"commonlib": {"commit": "a" * 40}, "minhook": {"commit": "b" * 40}, "packages": {"fmt": "1"}}
+        self.pins.write_text(json.dumps(self.pin_data), encoding="utf-8")
+        for name in sdk.REQUIRED_FILES:
+            (self.prefix / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.prefix / name).write_bytes(b"required")
         self.native = Path(self.tmp.name) / "native"
         (self.native / "observation/include").mkdir(parents=True)
         (self.native / "observation/asm").mkdir(parents=True)
@@ -72,6 +76,7 @@ class Receipt(unittest.TestCase):
 
     def _write_receipt(self):
         receipt = {"pins_sha256": sdk.sha256(self.pins), "sources_sha256": sdk.sources_digest(self.native),
+                   "commonlib_commit": "a" * 40, "minhook_commit": "b" * 40, "packages": {"fmt": "1"},
                    "files": sdk.manifest(self.prefix)}
         (self.prefix / sdk.RECEIPT).write_text(json.dumps(receipt), encoding="utf-8")
 
@@ -90,8 +95,27 @@ class Receipt(unittest.TestCase):
         (self.prefix / "lib" / "b.lib").write_bytes(b"new")
         self.assertEqual(self.verify(), ["unexpected: lib/b.lib"])
 
+    def _edit_receipt(self, **changes):
+        path = self.prefix / sdk.RECEIPT
+        path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), **changes}), encoding="utf-8")
+
+    def test_receipt_with_no_files_and_no_artifacts_fails(self):
+        for name in sdk.REQUIRED_FILES:
+            (self.prefix / name).unlink()
+        (self.prefix / "lib" / "a.lib").unlink()
+        self._edit_receipt(files={})
+        self.assertTrue([p for p in self.verify() if "required file absent" in p])
+
+    def test_recorded_commit_must_be_the_pin(self):
+        self._edit_receipt(commonlib_commit="c" * 40)
+        self.assertIn("commonlib_commit", self.verify()[0])
+
+    def test_recorded_packages_must_be_the_pins(self):
+        self._edit_receipt(packages={"fmt": "9"})
+        self.assertIn("packages", self.verify()[0])
+
     def test_changed_pins_make_the_sdk_stale(self):
-        self.pins.write_text('{"x":1}', encoding="utf-8")
+        self.pins.write_text(json.dumps({**self.pin_data, "x": 1}), encoding="utf-8")
         self.assertIn("stale", self.verify()[0])
 
     def test_changed_observation_header_makes_the_sdk_stale(self):
@@ -101,6 +125,15 @@ class Receipt(unittest.TestCase):
     def test_changed_sdk_config_makes_the_sdk_stale(self):
         (self.native / "sdk/SkyrimNativeSdkConfig.cmake").write_text("y", encoding="utf-8")
         self.assertIn("stale", self.verify()[0])
+
+    def test_qualification_binds_to_this_receipt(self):
+        self.assertFalse(sdk.qualification_state(self.prefix))
+        record = self.prefix / sdk.QUALIFIED
+        record.write_text(json.dumps({"receipt_sha256": sdk.sha256(self.prefix / sdk.RECEIPT)}), encoding="utf-8")
+        self.assertTrue(sdk.qualification_state(self.prefix))
+        self.assertEqual(self.verify(), [])
+        self._edit_receipt(rebuilt=True)
+        self.assertFalse(sdk.qualification_state(self.prefix))
 
     def test_no_receipt_fails(self):
         (self.prefix / sdk.RECEIPT).unlink()
@@ -125,15 +158,31 @@ class GameRoot(unittest.TestCase):
 
 class LinkOutput(unittest.TestCase):
     EXPORTS = "1 0 00001 SKSEPlugin_Load\n2 1 00002 SKSEPlugin_Query\n"
+    GOOD = "    KERNEL32.dll\n    VCRUNTIME140.dll\n"
 
     def test_good_link_passes(self):
-        self.assertEqual(sdk.check_link_output(self.EXPORTS, "KERNEL32.dll\nVCRUNTIME140.dll\n"), [])
+        self.assertEqual(sdk.check_link_output(self.EXPORTS, self.GOOD), [])
 
     def test_missing_query_fails(self):
-        self.assertIn("SKSEPlugin_Query", sdk.check_link_output("SKSEPlugin_Load", "")[0])
+        self.assertIn("SKSEPlugin_Query", sdk.check_link_output("SKSEPlugin_Load", self.GOOD)[0])
+
+    def test_an_unreadable_import_list_fails(self):
+        self.assertIn("unreadable", sdk.check_link_output(self.EXPORTS, "")[0])
+
+    def test_a_name_merely_containing_a_library_passes(self):
+        self.assertEqual(sdk.check_link_output(self.EXPORTS, self.GOOD + "    myfmtless.dll\n"), [])
 
     def test_a_dependency_dll_fails(self):
-        self.assertIn("fmt", sdk.check_link_output(self.EXPORTS, "fmt.dll")[0])
+        self.assertIn("fmt", sdk.check_link_output(self.EXPORTS, self.GOOD + "    fmt.dll\n")[0])
+
+
+class Toolset(unittest.TestCase):
+    def test_v143_passes(self):
+        sdk.check_toolset("14.44.35207")
+
+    def test_another_toolset_refuses(self):
+        with self.assertRaises(sdk.Refused):
+            sdk.check_toolset("14.29.30133")
 
 
 if __name__ == "__main__":

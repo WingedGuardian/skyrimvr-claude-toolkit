@@ -25,8 +25,13 @@ HERE = Path(__file__).resolve().parent
 NATIVE = HERE.parent
 PINS = HERE / "pins.json"
 RECEIPT = "sdk-receipt.json"
+QUALIFIED = "sdk-qualified.json"
 FORBIDDEN_IMPORTS = ("fmt", "spdlog", "openvr_api", "directxtk", "minhook")
 REQUIRED_EXPORTS = ("SKSEPlugin_Load", "SKSEPlugin_Query")
+REQUIRED_FILES = ("lib/CommonLibSSE.lib", "lib/minhook.x64.lib", "lib/cmake/CommonLibSSE/CommonLibSSEConfig.cmake",
+                  "lib/cmake/SkyrimNativeSdk/SkyrimNativeSdkConfig.cmake", "include/MinHook.h", "licenses/CommonLibVR-COPYING.txt",
+                  "licenses/MinHook-LICENSE.txt")
+SUPPORTED_TOOLSETS = ("14.3", "14.4")     # MSVC v143: what CommonLib's C++23 needs and what was tested
 
 
 class Refused(Exception):
@@ -81,7 +86,7 @@ def check_baseline(configuration: dict, pinned: str) -> None:
 
 def manifest(prefix: Path) -> dict:
     return {p.relative_to(prefix).as_posix(): sha256(p)
-            for p in sorted(prefix.rglob("*")) if p.is_file() and p.name != RECEIPT}
+            for p in sorted(prefix.rglob("*")) if p.is_file() and p.name not in (RECEIPT, QUALIFIED)}
 
 
 def compare_manifest(recorded: dict, current: dict) -> list:
@@ -122,16 +127,47 @@ def verify(prefix: Path, pins_path: Path = PINS, native: Path = NATIVE) -> list:
         problems.append("stale: the pins changed since this SDK was built")
     if receipt.get("sources_sha256") != sources_digest(native):
         problems.append("stale: the observation sources or SDK config changed since this SDK was built")
-    problems.extend(compare_manifest(receipt.get("files") or {}, manifest(prefix)))
+    pins = load_pins(pins_path)
+    for field, section in (("commonlib_commit", "commonlib"), ("minhook_commit", "minhook")):
+        if receipt.get(field) != (pins.get(section) or {}).get("commit"):
+            problems.append("{} is not the pinned commit".format(field))
+    if receipt.get("packages") != pins.get("packages"):
+        problems.append("the recorded packages are not the pinned set")
+    recorded = receipt.get("files") or {}
+    problems.extend("required file absent: " + name for name in REQUIRED_FILES if name not in recorded)
+    problems.extend(compare_manifest(recorded, manifest(prefix)))
     return problems
+
+
+def qualification_state(prefix: Path) -> bool:
+    """True only if a link qualification ran against exactly this receipt."""
+    record, receipt = prefix / QUALIFIED, prefix / RECEIPT
+    if not record.is_file() or not receipt.is_file():
+        return False
+    try:
+        return json.loads(record.read_text(encoding="utf-8")).get("receipt_sha256") == sha256(receipt)
+    except ValueError:
+        return False
+
+
+def check_toolset(version: str) -> None:
+    if not version or not version.startswith(SUPPORTED_TOOLSETS):
+        raise Refused("MSVC toolset {} is not v143 (14.3x-14.4x)".format(version))
+
+
+def imported_dlls(dependents: str) -> list:
+    """The DLL names in `dumpbin /dependents` output, lowercased, one per import. Exact names, not a substring search."""
+    return [line.strip().lower() for line in dependents.splitlines() if line.strip().lower().endswith(".dll") and " " not in line.strip()]
 
 
 def check_link_output(exports: str, dependents: str) -> list:
     """Problems with a linked consumer: missing SKSE exports, or a dependency that would become a runtime requirement."""
-    problems = ["missing export " + name for name in REQUIRED_EXPORTS if name not in exports]
-    lowered = dependents.lower()
+    problems = ["missing export " + name for name in REQUIRED_EXPORTS if name not in exports.split()]
+    names = imported_dlls(dependents)
+    if not any(name == "kernel32.dll" for name in names):
+        problems.append("the import list is unreadable: no KERNEL32.dll in it")
     problems.extend("runtime dependency on {} (must link statically)".format(name)
-                    for name in FORBIDDEN_IMPORTS if name in lowered)
+                    for name in names if name.rsplit(".", 1)[0].startswith(FORBIDDEN_IMPORTS))
     return problems
 
 
@@ -191,17 +227,27 @@ def fetch(repo: str, commit: str, dest: Path, logs: Path, submodules: bool) -> N
         raise Refused("{} has local changes; use a new --work".format(dest))
 
 
+def bootstrap_vcpkg(pins: dict, work: Path, logs: Path) -> Path:
+    """vcpkg at the pinned baseline commit: its scripts, ports and tool all come from that one commit, and bootstrap
+    checks the tool's hash. A shared or runner-provided vcpkg folder would make them mutable inputs."""
+    root = work / "vcpkg"
+    fetch("https://github.com/microsoft/vcpkg.git", pins["commonlib"]["vcpkg_baseline"], root, logs, submodules=False)
+    if not (root / "vcpkg.exe").is_file():
+        run("vcpkg-bootstrap", ["cmd", "/c", root / "bootstrap-vcpkg.bat", "-disableMetrics"], logs, cwd=root)
+    return root
+
+
 def build(prefix: Path, work: Path, jobs: int) -> int:
     pins = load_pins()
+    prefix, work = prefix.resolve(), work.resolve()    # configure runs elsewhere: a relative prefix would land elsewhere
     refuse_game_root(prefix)
     refuse_game_root(work)
     if prefix.exists() and any(prefix.iterdir()):
         raise Refused("{} is not empty: an SDK prefix is built once and never updated in place".format(prefix))
-    vcpkg_root = os.environ.get("VCPKG_ROOT")
-    if not vcpkg_root or not Path(vcpkg_root, "vcpkg.exe").is_file():
-        raise Refused("set VCPKG_ROOT to a folder holding vcpkg.exe; only the tool is used, ports come from the pin")
     env = vs_environment()
+    check_toolset(env.get("VCToolsVersion", ""))
     logs = work / "logs"
+    vcpkg_root = str(bootstrap_vcpkg(pins, work, logs))
     source, binary = work / "commonlib", work / "b"
     fetch(pins["commonlib"]["repo"], pins["commonlib"]["commit"], source, logs, submodules=True)
     submodule = git_head(source / "extern/openvr")
@@ -252,6 +298,7 @@ def build(prefix: Path, work: Path, jobs: int) -> int:
     receipt = {
         "schema": 1,
         "pins_sha256": sha256(PINS),
+        "vcpkg_commit": git_head(Path(vcpkg_root)),
         "sources_sha256": sources_digest(),
         "commonlib_commit": git_head(source),
         "openvr_commit": submodule,
@@ -271,6 +318,7 @@ def build(prefix: Path, work: Path, jobs: int) -> int:
 
 def qualify(prefix: Path, work: Path) -> int:
     """A real link of the example consumer against the installed bytes. Finding the package proves nothing."""
+    prefix, work = prefix.resolve(), work.resolve()
     problems = verify(prefix)
     if problems:
         raise Refused("the SDK does not verify:\n  " + "\n  ".join(problems[:20]))
@@ -285,13 +333,15 @@ def qualify(prefix: Path, work: Path) -> int:
     run("qualify-build", ["cmake", "--build", binary, "-j", "2"], logs, env)
     dll = binary / "SkyrimNativeExample.dll"
     dumpbin = shutil.which("dumpbin", path=env.get("Path") or env.get("PATH"))
-    exports = subprocess.run([dumpbin, "/exports", str(dll)], capture_output=True, text=True, check=False).stdout
-    dependents = subprocess.run([dumpbin, "/dependents", str(dll)], capture_output=True, text=True, check=False).stdout
+    exports = subprocess.run([dumpbin, "/exports", str(dll)], capture_output=True, text=True, check=True).stdout
+    dependents = subprocess.run([dumpbin, "/dependents", str(dll)], capture_output=True, text=True, check=True).stdout
     failures = check_link_output(exports, dependents)
     if failures:
         print("\n".join(failures), file=sys.stderr)
         return 1
     run("qualify-test", ["ctest", "--test-dir", binary, "--output-on-failure"], logs, env)
+    (prefix / QUALIFIED).write_text(json.dumps({"receipt_sha256": sha256(prefix / RECEIPT), "example_dll_sha256": sha256(dll),
+                                                "msvc_toolset": env.get("VCToolsVersion")}, indent=1), encoding="utf-8", newline="\n")
     print("link qualified: {} sha256 {}".format(dll.name, sha256(dll)))
     return 0
 
@@ -307,8 +357,9 @@ def main(argv=None) -> int:
     try:
         if args.command == "verify":
             problems = verify(args.prefix)
-            print(json.dumps({"verified": not problems, "problems": problems}) if args.json
-                  else "\n".join(problems) or "verified")
+            qualified = qualification_state(args.prefix)
+            print(json.dumps({"verified": not problems, "link_qualified": qualified, "problems": problems}) if args.json
+                  else "\n".join(problems) or ("verified, link qualified" if qualified else "verified, NOT link qualified"))
             return 1 if problems else 0
         if not args.work:
             raise Refused("--work is required")

@@ -10,6 +10,7 @@
 
 
 extern "C" void SkyrimNativeCapture(void(*)(void*),void*,skyrim_native::Context*);
+extern "C" void SkyrimNativeDistinctVectors(void(*)(void*),void*);
 extern "C" void SkyrimNativeLeaf(void*);
 extern "C" void SkyrimNativeNoOpLeaf(void*);
 extern "C" void SkyrimNativeMutatingLeaf(void*);
@@ -42,6 +43,37 @@ struct Snapshot {
 void check(bool value,const char* name) {
     ++checks; if(!value){++failures;std::printf("FAIL %s\n",name);}
 }
+// Unwinds from the observer through the bridge with the OS unwinder, using only the bridge's metadata, and compares what it
+// recovers with the packet. Wrong .savereg or .savexmm128 slots cannot pass this.
+unsigned bridgeUnwindMisses{}, bridgeUnwindChecks{};
+void checkBridgeUnwind(const skyrim_native::Context& packet) noexcept {
+    CONTEXT c{};
+    RtlCaptureContext(&c);
+    for (unsigned depth = 0; depth < 16; ++depth) {
+        bool inBridge = false;
+        for (auto range : wrapperRanges) inBridge = inBridge || (c.Rip >= range[0] && c.Rip < range[1]);
+        DWORD64 base = 0;
+        const auto fn = RtlLookupFunctionEntry(c.Rip, &base, nullptr);
+        if (!fn) {
+            c.Rip = *reinterpret_cast<DWORD64*>(c.Rsp);
+            c.Rsp += 8;
+        } else {
+            PVOID handler = nullptr;
+            DWORD64 frame = 0;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, c.Rip, fn, &c, &handler, &frame, nullptr);
+        }
+        if (!inBridge) continue;
+        ++bridgeUnwindChecks;
+        bool same = c.Rip == packet.caller && c.Rsp == packet.gpr[4] + 8 && c.Rbx == packet.gpr[3] && c.Rbp == packet.gpr[5] &&
+                    c.Rsi == packet.gpr[6] && c.Rdi == packet.gpr[7] && c.R12 == packet.gpr[12] && c.R13 == packet.gpr[13] &&
+                    c.R14 == packet.gpr[14] && c.R15 == packet.gpr[15];
+        for (unsigned n = 0; n < 10; ++n)
+            same = same && std::memcmp(&c.Xmm6 + n, packet.xstate + 160 + 16 * (6 + n), 16) == 0;
+        if (!same) ++bridgeUnwindMisses;
+        return;
+    }
+    ++bridgeUnwindMisses;
+}
 void negativeControl(void* arg) {
     volatile unsigned changed=GetCurrentThreadId(); (void)changed;
     SkyrimNativeLeaf(arg);
@@ -58,6 +90,9 @@ extern "C" void SkyrimNativeObserveImpl(unsigned site,unsigned phase,const skyri
         if(observeDisabled)return;
         if((reinterpret_cast<std::uintptr_t>(_AddressOfReturnAddress())&15)!=8)++alignmentMisses;
         ++observations;
+#if SKYRIM_NATIVE_HAVE_BRIDGES
+        if(ctx && phase==0)checkBridgeUnwind(*ctx);
+#endif
         if(ctx){auto& copy=phase?returned:entry;copy=*ctx;copy.xstate=nullptr;}
         volatile auto thread=GetCurrentThreadId(); (void)thread;
 #if SKYRIM_NATIVE_HAVE_BRIDGES
@@ -142,6 +177,7 @@ int main(int argc,char** argv) {
             }
         }
         observeFailure=false;
+        for(auto wrapper:wrappers)SkyrimNativeDistinctVectors(wrapper,heap);
         observeDisabled=true;*counter=0;observations=0;
         SkyrimNativeCapture(SkyrimNativeWrapper0,heap,&actual);
         check(*counter==1 && observations==0,"disabled recorder still forwards original");
@@ -209,6 +245,8 @@ int main(int argc,char** argv) {
             *originals[n]=SkyrimNativeLeaf;
         }
         observeFailure=false;
+        check(bridgeUnwindChecks>0,"the bridge unwind check really ran");
+        check(bridgeUnwindMisses==0,"bridge unwind restores the caller's nonvolatile state");
         check(unwindMisses==0,"Windows stack walker traverses every ordinary/nested/foreign/exception observation");
         check(alignmentMisses==0,"Windows x64 call alignment and writable home slots");
 #else

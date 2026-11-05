@@ -63,13 +63,21 @@ inline std::optional<SiteConfig> parseConfig(std::string_view text) noexcept {
             if (value != "1") return std::nullopt;
             config.descriptor.r11IsNotAnInput = true;
             bit = 8;
+        } else if (key == "no_stack_arguments") {
+            if (value != "1") return std::nullopt;
+            config.descriptor.noStackArguments = true;
+            bit = 16;
+        } else if (key == "incoming_rbp_unused") {
+            if (value != "1") return std::nullopt;
+            config.descriptor.incomingRbpUnused = true;
+            bit = 32;
         } else {
             return std::nullopt;
         }
         if (seen & bit) return std::nullopt;
         seen |= bit;
     }
-    if (seen != 15 || !config.rva || !skyrim_native::validDescriptor(config.descriptor)) return std::nullopt;
+    if (seen != 63 || !config.rva || !skyrim_native::validDescriptor(config.descriptor)) return std::nullopt;
     return config;
 }
 }

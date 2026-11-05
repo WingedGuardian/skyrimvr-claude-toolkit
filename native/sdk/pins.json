@@ -41,13 +41,13 @@
   "runtime_requirements": [
     "Skyrim VR 1.4.15",
     "SKSEVR 2.0.12",
+    "Microsoft Visual C++ 2015-2022 runtime (the game already needs it)",
     "VR Address Library (Data/SKSE/Plugins/version-1-4-15-0.csv)"
   ],
   "development_requirements": [
     "Windows x64",
     "git",
     "Python 3.10+",
-    "Visual Studio 2022 Build Tools with MSVC v143 and bundled CMake and Ninja",
-    "vcpkg (tool only, from VCPKG_ROOT)"
+    "Visual Studio 2022 Build Tools with MSVC v143 and bundled CMake and Ninja"
   ]
 }

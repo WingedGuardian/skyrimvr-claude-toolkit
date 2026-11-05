@@ -2,6 +2,8 @@
 // generalised so the same machinery is exercised through several consumer descriptors.
 #include "skyrim_native/entry_hook.hpp"
 #include "skyrim_native/forward.hpp"
+#include "skyrim_native/xstate.hpp"
+#include "skyrim_native/context.hpp"
 #include <cstdio>
 #include <initializer_list>
 #include <stdexcept>
@@ -11,6 +13,11 @@ extern "C" void EntryFrame(void*) noexcept(false);
 extern "C" void EntryFrameB(void*) noexcept(false);
 extern "C" void EntryFrameC(void*) noexcept(false);
 extern "C" int EntryAbi(void (*)(void*), void*) noexcept(false);
+extern "C" void EntryBridgeWrapper();
+extern "C" {
+std::uintptr_t EntryBridgeOriginal{};
+std::uint64_t SkyrimNativeXStateMask{};
+}
 using skyrim_native::EntryDescriptor;
 using skyrim_native::EntryHook;
 namespace {
@@ -39,6 +46,9 @@ void outer(void* arg) {
     ++outerAfter;
 }
 void returnMarker() {}
+EntryDescriptor describe(const std::array<std::uint8_t, 31>& bytes, const std::array<std::uint8_t, 12>& unwind) {
+    return EntryDescriptor{bytes, unwind, true, true, true};
+}
 void noDetour(void*) {}
 
 // offset into the trampoline, and how many displaced PUSHes have run by then.
@@ -87,21 +97,40 @@ void checkUnwind(const EntryHook& hook, std::initializer_list<Boundary> boundari
 
 // A descriptor that is not this fixture's must not unwind correctly: a passing fixture proves nothing about another site.
 void otherSiteProofs(std::uintptr_t target, std::array<std::uint8_t, 31> prefix) {
-    EntryDescriptor wrongBytes{prefix, kUnwindA, true};
+    auto wrongBytes = describe(prefix, kUnwindA);
     wrongBytes.expected[6] ^= 1;
     EntryHook denied;
     check(!denied.prepare(target, reinterpret_cast<std::uintptr_t>(&noDetour), wrongBytes, readMemory) && !denied.created,
           "another site's bytes refuse before any hook exists");
-    EntryDescriptor noClaim{prefix, kUnwindA, false};
-    EntryHook unclaimed;
-    check(!unclaimed.prepare(target, reinterpret_cast<std::uintptr_t>(&noDetour), noClaim, readMemory) &&
-              unclaimed.status == EntryHook::kBadDescriptor, "a descriptor must claim R11 is not an input");
+    const auto refused = [&](EntryDescriptor d) {
+        EntryHook hook;
+        return !hook.prepare(target, reinterpret_cast<std::uintptr_t>(&noDetour), d, readMemory) && hook.status == EntryHook::kBadDescriptor;
+    };
+    auto claim = describe(prefix, kUnwindA);
+    claim.r11IsNotAnInput = false;
+    check(refused(claim), "a descriptor must claim R11 is not an input");
+    claim = describe(prefix, kUnwindA);
+    claim.noStackArguments = false;
+    check(refused(claim), "a descriptor must claim there are no stack arguments");
+    claim = describe(prefix, kUnwindA);
+    claim.incomingRbpUnused = false;
+    check(refused(claim), "a descriptor must claim incoming RBP is unused");
+    EntryHook noMask;
+    check(!noMask.prepareBridge(target, reinterpret_cast<std::uintptr_t>(&noDetour), describe(prefix, kUnwindA), 0, readMemory) &&
+              noMask.status == EntryHook::kBadStateMask && !noMask.created, "a bridge with an unset state mask refuses");
 }
 void descriptorProofs() {
     using skyrim_native::validDescriptor;
-    check(validDescriptor({{}, kUnwindA, true}) && validDescriptor({{}, kUnwindB, true}) && validDescriptor({{}, kUnwindC, true}),
+    const std::array<std::uint8_t, 31> bytesA{0x40, 0x56, 0x57, 0x41, 0x56}, bytesB{0x40, 0x53, 0x55, 0x41, 0x56},
+        bytesC{0x4C, 0x89, 0x4C, 0x24, 0x20};
+    check(validDescriptor(describe(bytesA, kUnwindA)) && validDescriptor(describe(bytesB, kUnwindB)) && validDescriptor(describe(bytesC, kUnwindC)),
           "the qualified unwind shapes are accepted");
-    auto bad = [](std::array<std::uint8_t, 12> u) { return !validDescriptor({{}, u, true}); };
+    auto bad = [&](std::array<std::uint8_t, 12> u) { return !validDescriptor(describe(bytesA, u)); };
+    check(!validDescriptor(describe(bytesA, kUnwindB)), "unwind codes naming other registers refused");
+    check(!validDescriptor(describe(bytesA, kUnwindC)), "PUSHes declared with no unwind refused");
+    check(!validDescriptor(describe(bytesC, kUnwindA)), "unwind codes on bytes that push nothing refused");
+    check(!validDescriptor(describe({0x48, 0x83, 0xEC, 0x28, 0x90}, kUnwindC)), "a stack-changing shape we have not qualified refused");
+    check(!validDescriptor(describe({0x50, 0x48, 0x83, 0xEC, 0x28}, kUnwindC)), "a PUSH followed by other code refused");
     check(bad({2, 5, 3, 0, 5, 0xE0, 3, 0x70, 2, 0x60, 0, 0}), "unwind version refused");
     check(bad({9, 5, 3, 0, 5, 0xE0, 3, 0x70, 2, 0x60, 0, 0}), "unwind flags refused");
     check(bad({1, 6, 3, 0, 5, 0xE0, 3, 0x70, 2, 0x60, 0, 0}), "a prolog longer than the displaced bytes refused");
@@ -113,6 +142,52 @@ void descriptorProofs() {
     check(bad({1, 5, 1, 0, 5, 0xE0, 3, 0x70, 0, 0, 0, 0}), "bytes past the declared codes refused");
 }
 
+unsigned bridgeBefore{}, bridgeAfter{}, bodyBCalls{};
+bool throwBodyB{};
+// The combination a real consumer runs: relay, MASM bridge, trampoline, R11 continuation, displaced PUSHes, original.
+void bridgedShape(const std::array<std::uint8_t, 12>& unwind) {
+    const auto facts = skyrim_native::cpuStateFacts();
+    if (!skyrim_native::qualifiedState(facts)) { check(false, "this CPU's state is qualified for the bridge"); return; }
+    SkyrimNativeXStateMask = facts.enabled;
+    const auto target = reinterpret_cast<std::uintptr_t>(&EntryFrameB);
+    std::array<std::uint8_t, 31> prefix{};
+    check(readMemory(target, prefix.data(), prefix.size()), "read bridged fixture prefix");
+    static EntryHook hook;
+    if (!hook.prepareBridge(target, reinterpret_cast<std::uintptr_t>(&EntryBridgeWrapper), describe(prefix, unwind), SkyrimNativeXStateMask, readMemory)) {
+        std::printf("bridged prepare status=%d\n", hook.status);
+        check(false, "prepare the bridged site");
+        return;
+    }
+    static DWORD64 CONTEXT::*const saved[3]{&CONTEXT::Rbx, &CONTEXT::Rbp, &CONTEXT::R14};
+    checkUnwind(hook, {{0, 0}, {2, 1}, {3, 2}, {5, 3}, {15, 3}}, saved);
+    EntryBridgeOriginal = hook.trampoline;
+    if (!hook.enable(readMemory)) { check(false, "enable the bridged site"); return; }
+    check(hook.enabled && hook.retained(readMemory), "bridged site published and retained");
+
+    SetLastError(0x13572468u);
+    check(EntryAbi(EntryFrameB, expected) == 1, "bridged site preserves the caller's nonvolatile ABI");
+    check(bodyBCalls == 1 && bridgeBefore == 1 && bridgeAfter == 1, "bridged original runs once between its two observations");
+    check(GetLastError() == 0x24681357u, "bridged site keeps the original's LastError");
+    std::thread foreign([&] { SetLastError(0x13572468u); EntryAbi(EntryFrameB, expected); });
+    foreign.join();
+    check(bodyBCalls == 2 && bridgeBefore == 2 && bridgeAfter == 2, "bridged site forwards once on a foreign thread");
+    throwBodyB = true;
+    bool escaped = false;
+    SetLastError(0x13572468u);
+    try { EntryAbi(EntryFrameB, expected); } catch (const std::runtime_error&) { escaped = true; }
+    throwBodyB = false;
+    check(escaped, "the original's exception crosses the fixture, trampoline and bridge");
+    check(bodyBCalls == 3 && bridgeBefore == 3 && bridgeAfter == 2, "no after observation and no replay on the original's exception");
+    SetLastError(0x13572468u);
+    check(EntryAbi(EntryFrameB, expected) == 1 && bodyBCalls == 4 && bridgeAfter == 3, "the bridged site still works after an exception");
+
+    check(MH_DisableHook(reinterpret_cast<void*>(target)) == MH_OK, "bridged fixture disables its own hook");
+    DWORD64 base = 0;
+    const auto table = RtlLookupFunctionEntry(hook.trampoline + 5, &base, nullptr);
+    check(table && RtlDeleteFunctionTable(const_cast<PRUNTIME_FUNCTION>(table)), "bridged fixture unregisters its own metadata");
+    check(MH_RemoveHook(reinterpret_cast<void*>(target)) == MH_OK, "bridged fixture removes its own hook");
+}
+
 // Each extra shape: prepared, unwound at every boundary of that shape, then fully released. Never enabled, never run.
 void checkShape(void (*fixture)(void*), const std::array<std::uint8_t, 12>& unwind, std::initializer_list<Boundary> boundaries,
                 DWORD64 CONTEXT::*const (&saved)[3]) {
@@ -120,7 +195,7 @@ void checkShape(void (*fixture)(void*), const std::array<std::uint8_t, 12>& unwi
     std::array<std::uint8_t, 31> prefix{};
     check(readMemory(target, prefix.data(), prefix.size()), "read shape prefix");
     EntryHook hook;
-    if (!hook.prepare(target, reinterpret_cast<std::uintptr_t>(&noDetour), EntryDescriptor{prefix, unwind, true}, readMemory)) {
+    if (!hook.prepare(target, reinterpret_cast<std::uintptr_t>(&noDetour), describe(prefix, unwind), readMemory)) {
         std::printf("shape prepare status=%d\n", hook.status);
         check(false, "prepare a further descriptor");
         return;
@@ -132,6 +207,19 @@ void checkShape(void (*fixture)(void*), const std::array<std::uint8_t, 12>& unwi
     check(table && RtlDeleteFunctionTable(const_cast<PRUNTIME_FUNCTION>(table)), "fixture unregisters its own metadata");
     check(MH_RemoveHook(reinterpret_cast<void*>(target)) == MH_OK, "fixture removes its own unpublished hook");
 }
+}
+extern "C" void SkyrimNativeObserve(std::uint32_t, std::uint32_t phase, skyrim_native::Context*) noexcept {
+    ++(phase ? bridgeAfter : bridgeBefore);
+    SetLastError(0xFA110002u);
+}
+extern "C" void EntryBodyB(void* arg) noexcept(false) {
+    check(arg == expected, "bridged original receives its exact argument");
+    check(GetLastError() == 0x13572468u, "bridged observer preserves the incoming LastError");
+    ++bodyBCalls;
+    void* frames[16]{};
+    check(CaptureStackBackTrace(0, 16, frames, nullptr) > 2, "bridged original has a traversable native stack");
+    SetLastError(0x24681357u);
+    if (throwBodyB) throw std::runtime_error("bridged original");
 }
 extern "C" void EntryBody(void* arg) noexcept(false) {
     check(arg == expected, "exact original argument");
@@ -158,7 +246,7 @@ int main() {
         auto bad = prefix;
         bad[n] ^= 1;
         EntryHook denied;
-        check(!denied.prepare(target, replacement, EntryDescriptor{bad, kUnwindA, true}, readMemory) && !denied.created && !denied.writeAttempted,
+        check(!denied.prepare(target, replacement, describe(bad, kUnwindA), readMemory) && !denied.created && !denied.writeAttempted,
               "every mismatched source byte refuses before publication");
     }
     otherSiteProofs(target, prefix);
@@ -166,7 +254,7 @@ int main() {
     const auto outerAt = reinterpret_cast<std::uintptr_t>(&outer);
     check(readMemory(outerAt, outerBefore.data(), outerBefore.size()), "capture existing outer wrapper bytes");
     EntryHook hook;
-    if (!hook.prepare(target, replacement, EntryDescriptor{prefix, kUnwindA, true}, readMemory)) {
+    if (!hook.prepare(target, replacement, describe(prefix, kUnwindA), readMemory)) {
         std::printf("prepare status=%d\n", hook.status);
         check(false, "prepare actual MinHook adapter");
         return 1;
@@ -237,8 +325,7 @@ int main() {
     check(MH_RemoveHook(reinterpret_cast<void*>(target)) == MH_OK, "fixture removes only owned hook after disable");
     check(std::memcmp(reinterpret_cast<void*>(outerAt), outerBefore.data(), outerBefore.size()) == 0, "outer hook bytes never changed");
 
-    static DWORD64 CONTEXT::*const savedB[3]{&CONTEXT::Rbx, &CONTEXT::Rbp, &CONTEXT::R14};
-    checkShape(EntryFrameB, kUnwindB, {{0, 0}, {2, 1}, {3, 2}, {5, 3}, {15, 3}}, savedB);
+    bridgedShape(kUnwindB);
     static DWORD64 CONTEXT::*const savedC[3]{nullptr, nullptr, nullptr};
     checkShape(EntryFrameC, kUnwindC, {{0, 0}, {5, 0}, {15, 0}}, savedC);
 

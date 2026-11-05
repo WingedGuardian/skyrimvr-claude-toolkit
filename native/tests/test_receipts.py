@@ -27,6 +27,10 @@ class Binding(unittest.TestCase):
     def test_matching_build_passes(self):
         self.check()
 
+    def test_no_inputs_fails(self):
+        with self.assertRaisesRegex(ValueError, "no inputs"):
+            self.check({})
+
     def test_changed_source_fails(self):
         self.source.write_text("two", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "configure inputs differ"):

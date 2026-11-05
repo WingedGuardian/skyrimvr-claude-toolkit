@@ -4,13 +4,6 @@
 #include <cstdint>
 
 namespace skyrim_native {
-struct LastErrorScope {
-    const DWORD value{GetLastError()};
-    LastErrorScope() noexcept=default;
-    LastErrorScope(const LastErrorScope&)=delete;
-    LastErrorScope& operator=(const LastErrorScope&)=delete;
-    ~LastErrorScope() noexcept{SetLastError(value);}
-};
 struct ForwardCounts {
     std::atomic<std::uint64_t> entered{},forwarded{},returned{},unwound{},observerFaults{};
 };

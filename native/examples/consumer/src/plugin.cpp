@@ -61,13 +61,14 @@ void installHook() {
     if (!skyrim_native::qualifiedState(facts)) { spdlog::error("unqualified CPU state XCR0={:x}: inert", facts.enabled); return; }
     SkyrimNativeXStateMask = facts.enabled;
     const auto site = REL::Module::get().base() + config->rva;
-    if (!hook.prepare(site, reinterpret_cast<std::uintptr_t>(&SkyrimNativeExampleWrapper), config->descriptor, readMemory)) {
+    if (!hook.prepareBridge(site, reinterpret_cast<std::uintptr_t>(&SkyrimNativeExampleWrapper), config->descriptor, SkyrimNativeXStateMask, readMemory)) {
         spdlog::error("prepare refused, status {}: inert", hook.status);
         return;
     }
     SkyrimNativeExampleOriginal = hook.trampoline;
-    if (!hook.enable(readMemory)) { spdlog::error("enable refused, status {}", hook.status); return; }
-    hookLive.store(true, std::memory_order_release);
+    const bool enabled = hook.enable(readMemory);
+    hookLive.store(hook.enabled, std::memory_order_release);   // live even if the retained check then failed
+    if (!enabled) { spdlog::error("enable reported status {}; patched={}", hook.status, hook.enabled); return; }
     spdlog::info("hook live at rva {:x}; retained={}", config->rva, hook.retained(readMemory));
 }
 
@@ -79,7 +80,10 @@ void report(const char* why) {
 void onMessage(SKSE::MessagingInterface::Message* message) {
     if (!message) return;
     switch (message->type) {
-    case SKSE::MessagingInterface::kInputLoaded: installHook(); break;
+    case SKSE::MessagingInterface::kInputLoaded:
+        // A throw must not cross into SKSE's dispatcher, and this DLL can no longer unload: stay inert instead.
+        try { installHook(); } catch (...) { spdlog::error("hook installation threw: inert"); }
+        break;
     case SKSE::MessagingInterface::kPreLoadGame: report("preload"); break;
     case SKSE::MessagingInterface::kPostLoadGame:
         report(skyrim_native::loadSucceeded(reinterpret_cast<std::uintptr_t>(message->data), message->dataLen) ? "postload-ok" : "postload-failed");
@@ -102,7 +106,7 @@ SKSE_PLUGIN_QUERY(const SKSE::QueryInterface* query, SKSE::PluginInfo* info) {
 }
 
 SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* skse) {
-    openLog();                 // before Init, and Init told not to replace the logger
+    try { openLog(); } catch (...) {}   // a locked or odd log path costs the log, not the game. Before Init, which is told not to replace it.
     SKSE::Init(skse, false);
     spdlog::info("loaded; game {} VR={}", REL::Module::get().version().string(), REL::Module::IsVR());
     const auto* messaging = SKSE::GetMessagingInterface();

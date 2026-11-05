@@ -9,6 +9,8 @@
 //   +36 UNWIND_INFO (12)
 // MOV/JMP R11 replaces MinHook's stock FF25 jump, because Windows classifies that jump as an epilogue and virtual unwind
 // then goes wrong after displaced PUSHes. So R11 must not be an input at the site: the descriptor has to say so.
+//
+// Keep an EntryHook in static storage: once prepared, the OS function table points into it, for the life of the process.
 #include <Windows.h>
 #include <MinHook.h>
 #include <array>
@@ -20,26 +22,46 @@ namespace skyrim_native {
 struct EntryDescriptor {
     std::array<std::uint8_t, 31> expected{};    // the site's bytes; anything else (a foreign hook, a game update) refuses
     std::array<std::uint8_t, 12> unwind{};      // UNWIND_INFO for the displaced bytes
-    bool r11IsNotAnInput{};                     // evidence the consumer has from the site's decoded body
+    // Evidence the consumer has from the site's decoded body. Nothing here can check these for you.
+    bool r11IsNotAnInput{};
+    bool noStackArguments{};                    // the bridge cannot forward stack arguments: 5+ arguments or varargs get garbage
+    bool incomingRbpUnused{};                   // the bridge keeps RBP as its frame pointer across the original
 };
 
-// Only what a 5-byte displaced prologue can legally need: version 1, no flags or frame register, PUSH-nonvolatile codes
-// inside the displaced bytes, in the descending order the format requires.
-constexpr bool validDescriptor(const EntryDescriptor& d) noexcept {
-    if (!d.r11IsNotAnInput) return false;
-    const auto prolog = d.unwind[1];
-    const auto count = d.unwind[2];
-    if (d.unwind[0] != 1 || d.unwind[3] != 0 || prolog > 5 || count > 4) return false;
-    std::uint8_t previous = prolog + 1;
-    for (std::size_t n = 0; n < count; ++n) {
-        const auto offset = d.unwind[4 + 2 * n];
-        const auto code = d.unwind[5 + 2 * n];
-        if (offset == 0 || offset > prolog || offset >= previous || (code & 0x0F) != 0) return false;
-        previous = offset;
+// Only the displaced shapes we have qualified, fully decoded: REX-padded or plain PUSHes filling all 5 bytes, or a single
+// 5-byte store into a home slot (MOV [RSP+disp8],reg), which changes no stack. Anything else refuses. The unwind codes
+// must then be exactly what those bytes do, so a PUSH cannot be declared as another register or left out.
+constexpr bool unwindMatchesBytes(const std::array<std::uint8_t, 31>& expected, const std::array<std::uint8_t, 12>& unwind) noexcept {
+    std::uint8_t ends[5]{}, registers[5]{};
+    std::size_t pushes = 0, at = 0;
+    while (at < 5) {
+        const auto byte = expected[at];
+        const bool plain = byte >= 0x50 && byte <= 0x57;
+        const bool prefixed = (byte == 0x40 || byte == 0x41) && at + 1 < 5 && expected[at + 1] >= 0x50 && expected[at + 1] <= 0x57;
+        if (!plain && !prefixed) break;
+        const auto opcode = plain ? byte : expected[at + 1];
+        registers[pushes] = static_cast<std::uint8_t>(opcode - 0x50 + (byte == 0x41 ? 8 : 0));
+        at += plain ? 1 : 2;
+        ends[pushes++] = static_cast<std::uint8_t>(at);
     }
-    for (std::size_t n = 4 + 2 * std::size_t(count); n < d.unwind.size(); ++n)
-        if (d.unwind[n] != 0) return false;
+    if (at != 5) {
+        const bool homeStore = pushes == 0 && (expected[0] == 0x48 || expected[0] == 0x4C) && expected[1] == 0x89 &&
+                               (expected[2] & 0xC7) == 0x44 && expected[3] == 0x24;
+        if (!homeStore) return false;
+    }
+    if (unwind[1] != (pushes ? 5 : 0) || unwind[2] != pushes) return false;
+    for (std::size_t n = 0; n < pushes; ++n) {
+        const auto source = pushes - 1 - n;      // the format lists the last-executed operation first
+        if (unwind[4 + 2 * n] != ends[source] || unwind[5 + 2 * n] != (registers[source] << 4)) return false;
+    }
     return true;
+}
+constexpr bool validDescriptor(const EntryDescriptor& d) noexcept {
+    if (!d.r11IsNotAnInput || !d.noStackArguments || !d.incomingRbpUnused) return false;
+    if (d.unwind[0] != 1 || d.unwind[3] != 0 || d.unwind[2] > 4) return false;
+    for (std::size_t n = 4 + 2 * std::size_t(d.unwind[2]); n < d.unwind.size(); ++n)
+        if (d.unwind[n] != 0) return false;
+    return unwindMatchesBytes(d.expected, d.unwind);
 }
 
 // No process-lifetime destructor removes a live hook or frees its trampoline.
@@ -47,7 +69,7 @@ struct EntryHook {
     enum Status : std::int32_t {
         kAlreadyPrepared = 1001, kSourceMismatch = 1002, kStockLayout = 1003, kFlush = 1004, kSourceChanged = 1005,
         kEnableRevalidation = 1006, kNotRetained = 1007, kUnwindWrite = 1009, kUnwindRegister = 1010, kBridgeInvalid = 1011,
-        kContinuationWrite = 1012, kContinuationInvalid = 1013, kBadDescriptor = 1014
+        kContinuationWrite = 1012, kContinuationInvalid = 1013, kBadDescriptor = 1014, kBadStateMask = 1015
     };
     EntryHook() = default;
     EntryHook(const EntryHook&) = delete;
@@ -57,6 +79,7 @@ struct EntryHook {
     std::array<std::uint8_t, 5> patch{};
     std::int32_t status{};
     bool created{}, writeAttempted{}, unwindRegistered{};
+    bool enabled{};                             // MinHook patched the site. True even if the retained check then fails.
     RUNTIME_FUNCTION runtimeFunction{0, 19, 36};
     static_assert(sizeof(RUNTIME_FUNCTION) == 12 && 36 + 12 <= 64);
 
@@ -116,12 +139,20 @@ struct EntryHook {
         if (!bytesMatch(target, site.expected, 0, 0, read)) { status = kSourceChanged; return false; }
         return true;
     }
+    // For a site whose detour is a MASM BRIDGE. An unset state mask makes XSAVE and XRSTOR legal no-ops, so the observer
+    // would silently clobber the original's vector registers. Set the mask before this call.
+    template <class Read> bool prepareBridge(std::uintptr_t at, std::uintptr_t bridge, const EntryDescriptor& descriptor,
+                                             std::uint64_t stateMask, Read read) noexcept {
+        if ((stateMask & 3) != 3) { status = kBadStateMask; return false; }
+        return prepare(at, bridge, descriptor, read);
+    }
     template <class Read> bool enable(Read read) noexcept {
         if (!created || !bridgeValid(read) || !bytesMatch(target, site.expected, 0, 0, read)) { status = kEnableRevalidation; return false; }
         writeAttempted = true;
         const auto result = MH_EnableHook(reinterpret_cast<void*>(target));
         status = static_cast<int>(result);
         if (result != MH_OK) return false;
+        enabled = true;
         if (!retained(read)) { status = kNotRetained; return false; }
         return true;
     }

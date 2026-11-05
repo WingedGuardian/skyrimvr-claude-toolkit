@@ -3,10 +3,11 @@ name: Native SDK
 # qualification, which never builds this. Synthetic fixtures only: no game, no game bytes.
 on:
   push:
-    branches: [feat/native-observation]
+    branches: [master, main, feat/native-observation]
     paths:
       - "native/**"
       - ".github/workflows/native.yml"
+  workflow_dispatch:
 permissions:
   contents: read
 
@@ -27,7 +28,6 @@ jobs:
       - name: Build, verify and link-qualify the SDK from nothing
         shell: bash
         run: |
-          export VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT"
           python native/sdk/sdk.py build --prefix "C:/s/p" --work "C:/s/w" --jobs 4
           python native/sdk/sdk.py verify --prefix "C:/s/p"
           python native/sdk/sdk.py qualify --prefix "C:/s/p" --work "C:/s/w"

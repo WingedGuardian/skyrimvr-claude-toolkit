@@ -10,7 +10,8 @@
 This tool never derives an image and never runs a game or the derivation tool. You make the derived image yourself;
 `register` checks it against its source, records what you declare about how it was made, and stores one read-only copy
 per image hash, so consumers share it instead of copying it per run. Game bytes stay on your machine.
-What a declaration claims about the tool is recorded as declared: this tool cannot prove it.
+What a declaration claims about the tool is recorded as declared: this tool cannot prove it. Read-only attributes and a
+manifest hash catch accidents and drift; they do not stop a process determined to rewrite the store.
 
 The store is an explicit argument (or SKYRIM_NATIVE_IMAGE_STORE). There is no default location.
 
@@ -22,6 +23,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import struct
@@ -29,6 +31,10 @@ import sys
 from pathlib import Path
 
 MANIFEST = "manifest.json"
+MANIFEST_HASH = "manifest.sha256"
+SHA256 = re.compile(r"[0-9a-f]{64}")
+COMMIT = re.compile(r"[0-9a-f]{40}")
+MIN_SITE_BYTES = 5
 IMAGE = "image.bin"
 MAX_READ = 4096
 
@@ -49,6 +55,12 @@ class PE:
     """Just enough of a PE32+ file. Offsets are bounds-checked: the input is data, not trusted."""
 
     def __init__(self, data: bytes):
+        try:
+            self._parse(data)
+        except struct.error as e:
+            raise Refused("truncated PE file: {}".format(e)) from e
+
+    def _parse(self, data: bytes) -> None:
         self.data = data
         if data[:2] != b"MZ" or len(data) < 0x40:
             raise Refused("not a PE file")
@@ -74,6 +86,8 @@ class PE:
         for index in range(self.section_count):
             raw = data[table + 40 * index:table + 40 * index + 40]
             virtual_size, rva, raw_size, raw_pointer = struct.unpack_from("<IIII", raw, 8)
+            if raw_pointer + raw_size > len(data):
+                raise Refused("a section's file data runs past the end of the file")
             self.sections.append({"name": raw[:8].rstrip(b"\0").decode("latin-1"), "rva": rva,
                                   "virtual_size": virtual_size, "raw_size": raw_size, "raw_pointer": raw_pointer,
                                   "characteristics": struct.unpack_from("<I", raw, 36)[0]})
@@ -94,8 +108,10 @@ class PE:
         if section is None:
             raise Refused("RVA {:#x} is in no section".format(rva))
         delta = rva - section["rva"]
-        if delta + count > section["raw_size"]:
-            raise Refused("RVA {:#x}+{} runs past the section's file data".format(rva, count))
+        # Raw padding past the virtual size is not mapped code, so it is not served as if it were.
+        limit = min(section["raw_size"], section["virtual_size"] or section["raw_size"])
+        if delta + count > limit:
+            raise Refused("RVA {:#x}+{} runs past the section's mapped file data".format(rva, count))
         return self.data[section["raw_pointer"] + delta:section["raw_pointer"] + delta + count]
 
     def runtime_function(self, rva: int):
@@ -114,8 +130,17 @@ class PE:
                 flags = header[0] >> 3
                 return {"begin": begin, "end": end, "unwind_rva": unwind, "prolog_size": header[1],
                         "unwind_code_count": header[2], "chained": bool(flags & 4),
-                        "has_handler": bool(flags & 3)}
+                        "primary_begin": self._primary(begin, unwind), "has_handler": bool(flags & 3)}
         return None
+
+    def _primary(self, begin: int, unwind: int) -> int:
+        """The function a chained fragment belongs to: the handoff warns these ranges are fragments, not functions."""
+        for _ in range(32):
+            header = self.read(unwind, 4)
+            if not (header[0] >> 3) & 4:
+                return begin
+            begin, _end, unwind = struct.unpack("<III", self.read(unwind + 4 + 2 * ((header[2] + 1) & ~1), 12))
+        raise Refused("unwind chain is too long")
 
 
 def check_derivation(source: PE, image: PE) -> list:
@@ -150,10 +175,21 @@ def refuse_game_root(path: Path) -> None:
     for folder in [resolved, *resolved.parents]:
         if (folder / "SkyrimVR.exe").exists() or (folder / "SkyrimSE.exe").exists():
             raise Refused("the store cannot be inside a game folder ({})".format(folder))
+        if (folder / ".git").exists():
+            raise Refused("the store cannot be inside a git checkout ({}): a game image must never be committed".format(folder))
+
+
+def check_identity(pattern, value: str, what: str) -> None:
+    if not pattern.fullmatch(value):
+        raise Refused("{} is not a lowercase hex identity: {!r}".format(what, value))
 
 
 def register(store: Path, source: Path, image: Path, owner: str, tool: dict, note: str = "") -> dict:
     refuse_game_root(store)
+    check_identity(COMMIT, tool.get("commit", ""), "the tool commit")
+    check_identity(SHA256, tool.get("sha256", ""), "the tool hash")
+    if tool.get("source_sha256"):
+        check_identity(SHA256, tool["source_sha256"], "the tool source hash")
     for path in (source, image):
         if not path.is_file():
             raise Refused("{} is not a file".format(path))
@@ -179,8 +215,13 @@ def register(store: Path, source: Path, image: Path, owner: str, tool: dict, not
         existing = load(store, digest)
         if existing["source_sha256"] != source_digest:
             raise Refused("this image is already registered from a different source")
+        problems = verify(store, digest)
+        if problems:
+            raise Refused("this image is registered but damaged: " + "; ".join(problems))
         return existing
     temporary = store / (".incoming-" + digest)
+    if temporary.exists():
+        raise Refused("{} is left from an interrupted registration: remove it and retry".format(temporary))
     temporary.mkdir(parents=True)
     copied = temporary / IMAGE
     shutil.copyfile(image, copied)
@@ -188,14 +229,16 @@ def register(store: Path, source: Path, image: Path, owner: str, tool: dict, not
         shutil.rmtree(temporary)      # this run's own scratch
         raise Refused("the copy did not hash to its source")
     (temporary / MANIFEST).write_text(json.dumps(entry, indent=1), encoding="utf-8", newline="\n")
+    (temporary / MANIFEST_HASH).write_text(sha256(temporary / MANIFEST) + "\n", encoding="utf-8", newline="\n")
     (temporary / ".housekeep-keep").write_text("Immutable native image reference; see manifest.json.\n", encoding="utf-8")
-    for name in (IMAGE, MANIFEST):
+    for name in (IMAGE, MANIFEST, MANIFEST_HASH):
         os.chmod(temporary / name, stat.S_IREAD)
     os.replace(temporary, folder)
     return entry
 
 
 def load(store: Path, digest: str) -> dict:
+    check_identity(SHA256, digest, "the image reference")
     path = store / digest / MANIFEST
     if not path.is_file():
         raise Refused("no image {} in {}".format(digest, store))
@@ -206,6 +249,9 @@ def verify(store: Path, digest: str, installed: Path = None) -> list:
     entry = load(store, digest)
     problems = []
     image = store / digest / IMAGE
+    hash_file = store / digest / MANIFEST_HASH
+    if not hash_file.is_file() or hash_file.read_text(encoding="utf-8").strip() != sha256(store / digest / MANIFEST):
+        problems.append("the manifest does not match its recorded hash")
     if not image.is_file():
         problems.append("the image file is missing")
     elif sha256(image) != digest or entry.get("image_sha256") != digest:
@@ -241,6 +287,8 @@ def check_sites(store: Path, digest: str, descriptor: dict) -> list:
     problems = []
     for site in sites:
         expected = bytes.fromhex(site["expected_hex"])
+        if len(expected) < MIN_SITE_BYTES:
+            raise Refused("site {} needs at least {} expected bytes".format(site.get("name"), MIN_SITE_BYTES))
         actual = pe.read(int(site["rva"], 16), len(expected))
         if actual != expected:
             problems.append("{} at {}: expected {} found {}".format(site.get("name"), site["rva"], expected.hex(), actual.hex()))
@@ -281,7 +329,7 @@ def main(argv=None) -> int:
             return 0
         if args.command == "verify":
             problems = verify(store, args.sha256, args.installed)
-            print(json.dumps({"verified": not problems, "problems": problems, **load(store, args.sha256)}, indent=1))
+            print(json.dumps({**load(store, args.sha256), "verified": not problems, "problems": problems}, indent=1))
             return 1 if problems else 0
         if args.command == "inspect":
             print(json.dumps(inspect(store, args.sha256, int(args.rva, 16), args.bytes), indent=1))
@@ -289,7 +337,7 @@ def main(argv=None) -> int:
         problems = check_sites(store, args.sha256, json.loads(args.descriptor.read_text(encoding="utf-8")))
         print(json.dumps({"verified": not problems, "problems": problems}, indent=1))
         return 1 if problems else 0
-    except Refused as e:
+    except (Refused, ValueError, KeyError, OSError, struct.error) as e:
         print("REFUSED: {}".format(e), file=sys.stderr)
         return 2
 

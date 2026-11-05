@@ -4,6 +4,67 @@ EXTERN SkyrimNativeObserveImpl:PROC
 .code
 ; Test-only forwarding shim deliberately uses all four incoming home slots.
 ; The production bridge must reserve those 32 bytes without overlapping Context.
+; Distinct XMM6..15, so the bridge's unwind slots can be told apart. Arguments: target, RCX argument.
+SkyrimNativeDistinctVectors PROC FRAME
+    sub rsp,0C8h
+    .allocstack 0C8h
+    movdqu [rsp+20h],xmm6
+    .savexmm128 xmm6,20h
+    movdqu [rsp+30h],xmm7
+    .savexmm128 xmm7,30h
+    movdqu [rsp+40h],xmm8
+    .savexmm128 xmm8,40h
+    movdqu [rsp+50h],xmm9
+    .savexmm128 xmm9,50h
+    movdqu [rsp+60h],xmm10
+    .savexmm128 xmm10,60h
+    movdqu [rsp+70h],xmm11
+    .savexmm128 xmm11,70h
+    movdqu [rsp+80h],xmm12
+    .savexmm128 xmm12,80h
+    movdqu [rsp+90h],xmm13
+    .savexmm128 xmm13,90h
+    movdqu [rsp+0A0h],xmm14
+    .savexmm128 xmm14,0A0h
+    movdqu [rsp+0B0h],xmm15
+    .savexmm128 xmm15,0B0h
+    .endprolog
+    mov rax,rcx
+    mov rcx,rdx
+    mov r8d,61000000h
+    movd xmm6,r8d
+    mov r8d,61000001h
+    movd xmm7,r8d
+    mov r8d,61000002h
+    movd xmm8,r8d
+    mov r8d,61000003h
+    movd xmm9,r8d
+    mov r8d,61000004h
+    movd xmm10,r8d
+    mov r8d,61000005h
+    movd xmm11,r8d
+    mov r8d,61000006h
+    movd xmm12,r8d
+    mov r8d,61000007h
+    movd xmm13,r8d
+    mov r8d,61000008h
+    movd xmm14,r8d
+    mov r8d,61000009h
+    movd xmm15,r8d
+    call rax
+    movdqu xmm6,[rsp+20h]
+    movdqu xmm7,[rsp+30h]
+    movdqu xmm8,[rsp+40h]
+    movdqu xmm9,[rsp+50h]
+    movdqu xmm10,[rsp+60h]
+    movdqu xmm11,[rsp+70h]
+    movdqu xmm12,[rsp+80h]
+    movdqu xmm13,[rsp+90h]
+    movdqu xmm14,[rsp+0A0h]
+    movdqu xmm15,[rsp+0B0h]
+    add rsp,0C8h
+    ret
+SkyrimNativeDistinctVectors ENDP
 SkyrimNativeObserve PROC
     mov QWORD PTR [rsp+8],11223344h
     mov QWORD PTR [rsp+10h],22334455h

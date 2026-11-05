@@ -1,4 +1,5 @@
 EXTERN EntryBody:PROC
+EXTERN EntryBodyB:PROC
 .code
 ; Authored fixtures. Each has the displaced shape of one descriptor the tests exercise; none is game code.
 ; Shape A: REX-padded PUSH RSI, PUSH RDI, PUSH R14.
@@ -21,7 +22,7 @@ EntryFrame PROC FRAME
     ret
     db 16 dup(90h)
 EntryFrame ENDP
-; Shape B: REX-padded PUSH RBX, PUSH RBP, PUSH R14. Used through unwind only.
+; Shape B: REX-padded PUSH RBX, PUSH RBP, PUSH R14. Run through the real bridge and trampoline.
 EntryFrameB PROC FRAME
     db 40h
     push rbx
@@ -33,6 +34,8 @@ EntryFrameB PROC FRAME
     sub rsp,30h
     .allocstack 30h
     .endprolog
+    xor ebp,ebp
+    call EntryBodyB
     add rsp,30h
     pop r14
     pop rbp

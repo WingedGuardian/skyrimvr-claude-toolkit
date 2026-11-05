@@ -42,6 +42,8 @@ def record_build(configured: dict, build_folder, output_names) -> dict:
 def require_current(current: dict, configured: dict, built: dict, folder) -> None:
     """Raise ValueError unless the current inputs, the configure and the build all agree with the files on disk."""
     folder = Path(folder)
+    if not current:
+        raise ValueError("no inputs: nothing binds this result")
     if not configured.get("passed") or configured.get("inputs") != current:
         raise ValueError("configure inputs differ")
     if not built.get("passed") or built.get("inputs") != current or built.get("generated") != configured.get("generated"):
