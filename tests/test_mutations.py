@@ -3467,7 +3467,7 @@ _SP_CLAUSES = [
     ("r3-echo-e", ' and not (e.program == "echo" and e.argv and _ECHO_OPTS.match(e.argv[0]))', "",
      "test_r3_unreconstructable_stdin_into_a_shell_or_interpreter_is_opaque"),
     ("r3-interpreter-reader",
-     'e.program in ALL_SHELLS or (consumer_kind(e.program) == "interpreter" and _reads_code(e.argv)) or' + "\n",
+     'e.program in ALL_SHELLS or (consumer_kind(e.program) == "interpreter" and _reads_code(e.argv, bool(_PYTHON.fullmatch(e.program)))) or' + "\n",
      "e.program in ALL_SHELLS or" + "\n", "test_r3_unreconstructable_stdin_into_a_shell_or_interpreter_is_opaque"),
     ("r3-literal-code-to-body", r'ctx.out[j] = reader._replace(stdin_body="\n".join(texts + strings))', "pass",
      "test_r3_literal_stdin_into_an_interpreter_is_code_not_opaque"),
@@ -3475,7 +3475,7 @@ _SP_CLAUSES = [
      "    return True\n    for a in argv:\n        if a in _CODE_OPTS:",
      "test_r3_literal_stdin_into_an_interpreter_is_code_not_opaque"),
     ("r3-xargs-opaque",
-     'if program in ALL_SHELLS or (consumer_kind(program) == "interpreter" and _reads_code(e.argv)):',
+     'if program in ALL_SHELLS or (consumer_kind(program) == "interpreter" and _reads_code(e.argv, bool(_PYTHON.fullmatch(program)))):',
      "if False:", "test_r3_xargs_input_is_arguments_not_a_script"),
     ("r3-via-xargs-skip", "id(e) not in ctx.via_xargs and (", "True and (",
      "test_r3_xargs_input_is_arguments_not_a_script"),
@@ -10642,8 +10642,8 @@ MUTATIONS += [pytest.param(src, a, b, test, id=name) for name, src, a, b, test i
      'tests/test_review_v4_guard_gaps.py::test_round_two_bulk_spellings_need_the_typed_approval'),
     ('gap2-rsync-trailing-option',
      'tools/skyguard/writes.py',
-     '"--exclude", "--include", "--filter", "-f", "-e", "--rsh", "--files-from",\n',
-     '"--include", "--filter", "-f", "-e", "--rsh", "--files-from",\n',
+     '_RSYNC_VALUED = ("--exclude", "--include",',
+     '_RSYNC_VALUED = ("--include",',
      'tests/test_review_v4_guard_gaps.py::test_round_two_bulk_spellings_need_the_typed_approval'),
 ]]
 MUTATIONS += [pytest.param(src, a, b, test, id=name) for name, src, a, b, test in [
@@ -12231,7 +12231,7 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="opus2-" + name)
      "tests/test_review_v4_35f8_fixes.py::test_the_wrapped_command_is_read_past_its_options[runuser -l -c 'rm -rf Data' root]", "runuser-c"),
     ("tools/skyguard/shellparse.py", '(?P<lead>[;&|({\\n)]))[ \\t]*(?:(?:then|do', '(?P<lead>[;&|({\\n]))[ \\t]*(?:(?:then|do',
      _OG + "test_a_shift_in_a_one_line_case_arm_moves_the_arguments", "shift-in-case-arm"),
-    ("tools/skyguard/writes.py", 'e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _plain_operands(e.argv)[:-1])) and (', 'True) and (',
+    ("tools/skyguard/writes.py", 'e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _plain_operands_valued(e.argv, _RSYNC_VALUED)[:-1])) and (', 'True) and (',
      _OG + "test_one_named_settings_file_is_not_a_bulk_save_change[rsync a.ini '<C>/']", "rsync-named-settings-file"),
     ("tools/skyguard/writes.py", '    for _folder, _dirs, names in os.walk(physical.rstrip("/\\\\") + "/Saves", onerror=failed.append):', '    for _folder, _dirs, names in [next(os.walk(physical.rstrip("/\\\\") + "/Saves", onerror=failed.append), ("", [], []))]:',
      _OG + "test_saves_one_folder_down_still_count", "settings-saves-one-down"),
@@ -12327,6 +12327,6 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="f35-" + name) fo
     ("tools/skyguard/shellparse.py", '        skip = python and a in ("-X", "-W", "--check-hash-based-pycs")\n', '        skip = a in ("-X", "-W", "--check-hash-based-pycs")\n',
      _F35 + "test_an_option_value_stops_at_a_file_name_for_perl", "perl-w-no-value"),
     ("tools/skyguard/shellparse.py", '        if skip:                                    # `python -X utf8`', '        if skip and "." not in a:                   # `python -X utf8`',
-     _F35 + "test_a_python_option_value_with_a_dot_still_reads_its_program_from_a_pipe[-W ignore::foo.Bar]", "dotted-option-value"),
+     _F35 + "test_a_python_option_value_with_a_dot_still_reads_its_program_from_a_pipe[-X pycache_prefix=.cache]", "dotted-option-value"),
 ]]
 

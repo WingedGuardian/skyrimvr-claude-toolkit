@@ -208,3 +208,7 @@ def test_a_python_option_value_with_a_dot_still_reads_its_program_from_a_pipe(wo
 ])
 def test_only_pythons_own_i_counts(argv, want):
     assert writes._python_option_i(argv) is want
+
+
+def test_wignore_is_not_pythons_i_for_code_the_guard_cannot_parse(world):
+    assert judge(world, """python -Wignore -c "print(f'{'a':<16}')" """, os.path.dirname(world[0]))[0] == "allow"
