@@ -12323,7 +12323,7 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="f35-" + name) fo
      _F35 + "test_every_spelling_of_a_python_save_delete_is_read[import send2trash; send2trash.send2trash('<C>/Saves/main.ess')]", "delete-module"),
     ("tools/skyguard/shellparse.py", '            if c in "WX":\n', '            if c == "?":\n',
      _F35 + "test_only_pythons_own_i_counts", "i-inside-wignore"),
-    ("tools/skyguard/shellparse.py", '    if python:\n        return python_options(argv)[1] == "stdin"\n', '    if True:\n        return python_options(argv)[1] == "stdin"\n',
+    ("tools/skyguard/shellparse.py", '    if python:\n        seen, program = python_options(argv)\n', '    if True:\n        seen, program = python_options(argv)\n',
      _F35 + "test_an_option_value_stops_at_a_file_name_for_perl", "perl-w-no-value"),
     ("tools/skyguard/shellparse.py", '                k += 0 if j < len(w) else 1\n', '                pass\n',
      _F35 + "test_a_python_option_value_with_a_dot_still_reads_its_program_from_a_pipe[-X pycache_prefix=.cache]", "dotted-option-value"),
@@ -12339,6 +12339,8 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="f35-" + name) fo
      _F35 + "test_every_spelling_of_cps_target_folder_is_read[cp --target='<C>/Saves' x/main.ess]", "target-shortened"),
     ("tools/skyguard/writes.py", 'if any(a.name == "*" for a in node.names):', 'if False:',
      _F35 + "test_a_star_import_or_a_set_of_saves_is_read[from os import *; remove('<C>/Saves/main.ess')]", "star-import-delete"),
+    ("tools/skyguard/shellparse.py", """        return program == "stdin" or "i" in seen\n""", """        return program == "stdin"\n""",
+     _F35 + "test_python_i_reads_a_pipe_after_its_script[-i tool.py]", "python-i-reads-pipe"),
     ("tools/skyguard/shellparse.py", """tuple(argv[k + 1:k + 2]) not in ((), ("-",))""", """tuple(argv[k + 1:k + 2]) != ()""",
      _F35 + "test_every_python_option_spelling_still_reads_its_program_from_a_pipe[-- -]", "python-dashdash-dash"),
     ("tools/skyguard/shellparse.py", """        if k == 0 and re.match(r"-(?:[0-9]|V:)", w):\n""", """        if False:\n""",
@@ -12349,7 +12351,7 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="f35-" + name) fo
      _F35 + "test_every_spelling_of_mv_target_takes_the_source_away[mv -ft /elsewhere '<I>/Data/x.bsa']", "mv-target-spellings"),
     ("tools/skyguard/shellparse.py", 'k += 2 if w == "--check-hash-based-pycs" else 1', 'k += 1',
      _F35 + "test_every_python_option_spelling_still_reads_its_program_from_a_pipe[--check-hash-based-pycs always]", "pycs-option-value"),
-    ("tools/skyguard/shellparse.py", '    if python:\n        return python_options(argv)[1] == "stdin"\n', '    if False:\n        return python_options(argv)[1] == "stdin"\n',
+    ("tools/skyguard/shellparse.py", '    if python:\n        seen, program = python_options(argv)\n', '    if False:\n        seen, program = python_options(argv)\n',
      _F35 + "test_every_python_option_spelling_still_reads_its_program_from_a_pipe[-E]", "python-e-is-no-code"),
 ]]
 

@@ -318,3 +318,12 @@ def test_a_save_moved_in_by_any_target_spelling_is_a_backup_not_a_refusal(world)
     plain = judge(world, "mv -t '<C>/Saves' x/main.ess", os.path.dirname(world[0]))
     assert judge(world, "mv -vt '<C>/Saves' x/main.ess", os.path.dirname(world[0])) == plain
     assert plain[0] != "deny"
+
+
+@pytest.mark.parametrize("options", ["-i tool.py", "-ic x"])
+def test_python_i_reads_a_pipe_after_its_script(world, options):
+    assert judge(world, """echo "import os; os.remove('Data/x.esp')" | python {}""".format(options))[0] == "deny"
+
+
+def test_a_pipe_into_a_plain_script_is_still_data(world):
+    assert judge(world, """echo "import os; os.remove('Data/x.esp')" | python tool.py""")[0] == "allow"

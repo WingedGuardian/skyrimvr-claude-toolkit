@@ -5,7 +5,7 @@
 - Save guard: a save named in capitals (`MAIN.ESS`) is no longer missed by `cp --parents` or `rsync -R`.
 - Save guard: `rsync -P`, `-i` and `-l` are read as rsync's switches, so they no longer hide a source file.
 - Save guard: `cp` and `mv` target folders are read with `-vt` and a shortened `--target`.
-- Save guard: a Python program piped in behind clustered options such as `-bW ignore` or a `py` launcher tag is read.
+- Save guard: a Python program piped in behind clustered options such as `-bW ignore`, a `py` launcher tag, or `python -i tool.py` is read.
 - Save guard: a Python delete through `from os import *` or a set of paths is read.
 - Python the guard cannot parse (a newer syntax than its own Python) is no longer refused when a scan of its text finds nothing that could change a file or run a program. The scan catches accidents, not deliberately disguised code. Anything else stays refused.
 - Shared preservation core pinned to b86c709: each path resolves once per read-only pass, including the store check in `Dispatcher.pre`; `upgrade-stage` works through a linked parent folder; a failed `upgrade-preview` exits non-zero; a wildcard matching no save says why it is denied.
