@@ -206,12 +206,22 @@ def _save_room(backups, file_path):
     return ""
 
 
+FAILED = object()                       # what run() returns when the file exists and no copy of it could be taken
+MAX_FLAT_NAME = 160                     # of NTFS's 255 a component, and well under 260 for a whole default path
+
+
+def flat_name(file_path):
+    """The path as one file name. bash: sed 's|[/\\:]|_|g' | sed 's|^_*||'"""
+    return re.sub(r"[/\\:]", "_", file_path).lstrip("_")
+
+
 def take(project, tool_name, file_path, audit, agent="", session_id=""):
     """Back up one existing file. Returns the backup's Path, or None when no backup exists (FAILED is logged)."""
     backups = Path(project) / ".claude" / "backups"
     ts = audit.stamp()
-    # bash: sed 's|[/\\:]|_|g' | sed 's|^_*||'
-    safe = re.sub(r"[/\\:]", "_", file_path).lstrip("_")
+    safe = flat_name(file_path)
+    if len(safe) > MAX_FLAT_NAME:       # one file name holds the whole path: keep its end, and the manifest keeps the source
+        safe = "{}_{}".format(hashlib.sha256(safe.encode("utf-8", "surrogateescape")).hexdigest()[:12], safe[-MAX_FLAT_NAME + 13:])
     base = backups / "{}__{}".format(ts, safe)
     part = Path("{}.part-{}".format(base, os.getpid()))
     try:
@@ -383,6 +393,8 @@ def _restore_refusal(target):
         low = [x.lower() for x in parts]
         if low and low[-1].endswith(_RESTORE_NEVER_EXT):
             return "a plugin or archive"
+        if low and low[-1].endswith((".ess", ".skse")):
+            return "one half of a save pair, with no backup of the other half (use: tools/skyguard.sh snapshot restore)"
         if self_rules.text_kind(p) or (low and low[-1] == "guard-files.sha256"):
             return "one of the guard's own files"
         if any(":" in x for x in parts[1:]):
@@ -462,4 +474,4 @@ def run(project, tool_name, file_path, payload_empty, audit, agent="", session_i
         return
     if any(grep(p, file_path) for p in SKIP):
         return
-    take(project, tool_name, file_path, audit, agent, session_id)
+    return FAILED if take(project, tool_name, file_path, audit, agent, session_id) is None else None

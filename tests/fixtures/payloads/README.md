@@ -49,6 +49,11 @@ not the agent. Recapture when an agent upgrades its hook protocol.
 - **Not re-captured:** the two `mcp__devbench-vr__*` Claude fixtures (the DevBench server was not running) and the
   Codex 0.160.0 shapes that need special probes (MCP, `-C` subdirectory, `<<'PATCH'` through the shell).
 
+## Re-verification, 2026-11-02
+
+- **Agents:** `claude --version` -> `2.1.316 (Claude Code)`; `codex --version` -> `codex-cli 0.165.0`.
+- **Result: no shape change, so no fixture was replaced.** Record: `docs/superpowers/measurements/2026-11-02-plan8-agent-recheck.md`.
+
 ## Recapture
 
 ```bash
@@ -58,6 +63,7 @@ python tools/payload-capture/scrub.py raw tests/fixtures/payloads/<agent> --agen
 ```
 Run these in a scratch repo whose hooks point at `capture-hook.sh`, never in a real install.
 `--dangerously-bypass-hook-trust` applies to that one scratch invocation only.
+On Windows with Codex 0.165.0, give the hook a `commandWindows` that PowerShell can run, and use `-s danger-full-access` in the scratch repo: `-s workspace-write` recorded a read-only session in which no hook ran.
 
 ## What is scrubbed
 

@@ -67,7 +67,11 @@ echo "=============================================================="
 { [ -n "${BASH:-}" ] && [ -x "$BASH" ]; } || { echo "cannot tell which bash is running this check" >&2; exit 2; }
 
 echo "runtimes:"
-check "python"        "Python 3"       python --version
+if command -v python >/dev/null 2>&1; then
+  check "python"      "Python 3"       python --version
+else
+  check "python3"     "Python 3"       python3 --version
+fi
 check "node"          "v[0-9]"         node --version
 check "jq"            "jq-"            jq --version
 check "java"          "version"        java -version
@@ -113,6 +117,7 @@ if [ -n "$SPRIGGIT" ]; then
   INSTALLED=$("$SPRIGGIT" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   if [ -z "$PIN" ]; then
     printf '  %-22s unknown       no pin readable from .config/dotnet-tools.json\n' "spriggit version"
+    FAIL=1; MISSING="$MISSING spriggit-pin"
   elif [ "$INSTALLED" = "$PIN" ]; then
     printf '  %-22s ok            installed %s == pinned %s\n' "spriggit version" "$INSTALLED" "$PIN"
   else

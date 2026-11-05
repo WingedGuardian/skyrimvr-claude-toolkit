@@ -90,7 +90,7 @@ Bethesda key); on any other path such a command is allowed as read, and the verd
   - process substitution `<( )` / `>( )`: parsed as commands; the word itself is dynamic, and it joins the text it
     touches as bash does (`X=<(echo a) rm x` is an assignment prefix, then rm).
   - `$(( ))` arithmetic and `${ }` expansions are skipped; a `$( )` INSIDE them is not parsed.
-  - aliases and shell functions defined in the same command are not expanded (a function's BODY is parsed).
+  - aliases and shell functions defined in the same command are read at each call; ones defined elsewhere are not known.
   - PowerShell method calls other than [IO.File]/[IO.Directory] are not execs, except the opaque ones
     (.Delete/.MoveTo/.Invoke/::Create ...): a "?" exec whose argv is the receiver+method as written and the call's
     arguments, and for `.Delete()` an io.directory.delete of the receiver (unresolved). A script block or $( )
@@ -146,6 +146,12 @@ class Parsed(NamedTuple):
     # The "?" execs whose program word offered NO candidate (no same-command assignment, default or literal part):
     # the guard has no idea what runs. A save in their words asks the user (shell_rules, S-SAVE-OPAQUE).
     unnamed: Tuple[Exec, ...] = ()
+
+
+class _ListItem(str):
+    """A PowerShell word followed by a comma: `a,b,c` is ONE argument. The parser flattens lists into argv, so this
+    marks the word for ps_param (release review 2026-11-02: `Move-Item -Path a,b,c -Destination d` counted two saves).
+    It compares and hashes as the plain string."""
 
 
 class ParseError(Exception):
@@ -245,33 +251,56 @@ PS_SWITCHES = ("recurse", "force", "whatif", "confirm", "verbose", "debug", "pas
                "readonly", "system", "followsymlink", "usetransaction", "asstring", "asbytestream")
 
 
-def ps_param(ex: Exec, name: str, position: Optional[int] = None) -> Tuple[str, ...]:
+def ps_param(ex: Exec, name: str, position: Optional[int] = None, slot: Tuple[str, ...] = (),
+             before: Tuple[Tuple[str, ...], ...] = ()) -> Tuple[str, ...]:
     """Values of PowerShell parameter `name` in `ex.argv`: `-Name v`, `-Na v` (any prefix), `-Name:v`; plus the
     `position`-th positional argument (0-based) when given. A word `-x` that is a prefix of a known switch takes
-    no value; any other `-x` is assumed to take one."""
+    no value; any other `-x` is assumed to take one. A comma list is one argument and yields all its items.
+
+    PowerShell binds named parameters first, then gives the positional words to the positions still unfilled, so
+    `Copy-Item -Path a b` makes b the Destination. `slot`: other names of this position (a named one fills it, so no
+    positional word lands here). `before`: the names of each earlier position (each one filled by name moves this
+    position's word one to the left)."""
     want = name.lower()
     out, pos, k, argv = [], [], 0, ex.argv
+    named = []
+
+    def group(i):
+        """The list starting at argv[i] (`a,b,c`), and the index of its last item."""
+        items = [argv[i]]
+        while isinstance(argv[i], _ListItem) and i + 1 < len(argv):
+            i += 1
+            items.append(argv[i])
+        return items, i
+
     while k < len(argv):
         w, q = argv[k], ex.quoted[k]
         if w.startswith("-") and len(w) > 1 and not q:
             key, _, attached = w[1:].partition(":")
             key = key.lower()
+            named.append(key)
             if key and want.startswith(key):
                 if attached:
                     out.append(attached)
                 elif k + 1 < len(argv):
-                    out.append(argv[k + 1])
-                    k += 1
+                    items, k = group(k + 1)
+                    out.extend(items)
             elif attached or any(s.startswith(key) for s in PS_SWITCHES):
                 pass
             elif k + 1 < len(argv) and not (argv[k + 1].startswith("-") and not ex.quoted[k + 1]):
-                k += 1                                    # another parameter's value
+                k = group(k + 1)[1]                       # another parameter's value
             k += 1
             continue
-        pos.append(w)
+        items, k = group(k)
+        pos.append(items)
         k += 1
-    if position is not None and position < len(pos):
-        out.append(pos[position])
+    def by_name(names):
+        return any(key and n.startswith(key) for key in named for n in names)
+
+    if position is not None and not (slot and by_name((want,) + slot)):
+        position -= sum(1 for names in before if by_name(names))
+        if 0 <= position < len(pos):
+            out.extend(pos[position])
     return tuple(out)
 
 
@@ -325,7 +354,7 @@ class _Ctx:
 
 
 class _Word:
-    __slots__ = ("b", "l", "quoted", "dyn", "bs", "start", "raw")
+    __slots__ = ("b", "l", "quoted", "dyn", "bs", "start", "raw", "comma")
 
     def __init__(self, start: int):
         self.b: List[str] = []
@@ -335,6 +364,7 @@ class _Word:
         self.bs = False
         self.start = start
         self.raw = ""
+        self.comma = False
 
     def add(self, s: str, lit: Optional[str] = None) -> None:
         self.b.append(s)
@@ -821,7 +851,7 @@ class _Bash(_Scanner):
                         _, name, body_start = self.fn_open.pop()
                         f.function_name = None
                         # The `}` word is already consumed: the body is the text between `{` and this `}`.
-                        self.ctx.functions[name] = self.t[body_start:self.t.rfind("}", body_start, self.i)]
+                        _define_function(self.ctx, name, self.t[body_start:self.t.rfind("}", body_start, self.i)])
                     tail = _skip_redirections(self.t[self.i:])
                     isolated = (tail.startswith("|") and not tail.startswith("||")) or (
                         tail.startswith("&") and not tail.startswith("&&"))   # `&>x` was consumed as a redirection
@@ -1044,7 +1074,7 @@ class _Bash(_Scanner):
             self.i = i + 2
             return
         if nx == "{":
-            end = self._brace_end(i + 2)
+            end = self._brace_end(i + 2, f.mode == "dq")
             self._skipped(f, i + 2, end - 1, False)
             w.add(t[i:end])
             w.dyn = True
@@ -1094,13 +1124,31 @@ class _Bash(_Scanner):
         if not found and arith and _CMDLIKE.match(t, a, b):
             raise ParseError("a (( )) whose body reads as a command")
 
-    def _brace_end(self, j):
-        """End (exclusive) of a ${ ... } expansion starting after `${`, nested braces counted."""
+    def _brace_end(self, j, in_dq=False):
+        """End (exclusive) of a ${ ... } expansion starting after `${`, nested braces counted. Quotes protect braces in
+        an unquoted expansion and are ordinary characters in a double-quoted one, so where the two readings disagree
+        this declines to choose: `echo ${a:-'{'} ; rm x ; echo }` ran the rm while a quote-blind count hid it."""
+        end = self._brace_scan(j, "")
+        if end is None:
+            raise ParseError("unterminated ${")
+        if self._brace_scan(j, "\"" if in_dq else "'\"") != end:
+            raise ParseError("a ${ } whose end depends on how its quotes are read")
+        return end
+
+    def _brace_scan(self, j, quotes):
         t, n, depth = self.t, self.n, 1
         while j < n:
             c = t[j]
             if c == "\\":
                 j += 2
+                continue
+            if c in quotes:                # inside "...", a ' is an ordinary character: `"${n:-don't}"`
+                j += 1
+                while j < n and t[j] != c:
+                    j += 2 if c == '"' and t[j] == "\\" else 1
+                if j >= n:
+                    return None
+                j += 1
                 continue
             if c == "{":
                 depth += 1
@@ -1109,7 +1157,7 @@ class _Bash(_Scanner):
                 if depth == 0:
                     return j + 1
             j += 1
-        raise ParseError("unterminated ${")
+        return None
 
     def _ansi(self, f, w):
         t, n = self.t, self.n
@@ -1271,6 +1319,11 @@ class _Bash(_Scanner):
                     self._cmd(f, i).skip = True
                     self.i = k + 1
                     return
+            if f.function_pending and f.function_name:          # `f() ( ... )`: read at each call, like a { } body
+                k = self._pairs().get(i)
+                if k is not None:
+                    _define_function(self.ctx, f.function_name, self.t[i:k + 1])
+                f.function_name = None
             f.function_pending = False                          # a function's ( ) body keeps its own location
             g = self._push(f, "paren", i, False)
             g.piped_from = ((f.id, f.pipe) if f.last_sep in ("|", "|&") and f.stage > 0 else
@@ -1596,6 +1649,8 @@ class _Pwsh(_Scanner):
                 self._redirect(f)
             elif c == ",":
                 self.end_word(f)
+                if f.cmd is not None and f.cmd.words:
+                    f.cmd.words[-1].comma = True
                 self.i += 1
             else:                                               # '#' inside a word
                 self._word(f).add(c)
@@ -1744,8 +1799,8 @@ class _Pwsh(_Scanner):
             g.opq = len(self.synth)
             self.synth.append((len(self.recs), Exec(
                 "?", (self.t[w.start:i],), (False,), (), "powershell", f.cd, "", self.t[w.start:i])))
-            if tail.group(1).lower() == "delete":
-                # `.Delete()` deletes its RECEIVER: an operand the guard cannot place, never nothing.
+            if tail.group(1).lower() in ("delete", "moveto"):
+                # `.Delete()` / `.MoveTo()` take away their RECEIVER: an operand the guard cannot place, never nothing.
                 self.synth.append((len(self.recs), Exec(
                     "io.directory.delete", (self.t[w.start:tail.start()],), (False,), (), "powershell", f.cd, "",
                     self.t[w.start:i])))
@@ -2003,6 +2058,17 @@ _WRAPPERS = {
     "ionice": (frozenset(("-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid", "--pgid", "--uid")), 0),
     "chroot": (frozenset(("--userspec", "--groups")), 1),
     "busybox": (frozenset(), 0),
+    "toybox": (frozenset(), 0),
+    "gsudo": (frozenset(("-u", "--user", "-i", "--integrity")), 0),
+    "pkexec": (frozenset(("--user",)), 0),
+    "runuser": (frozenset(("-u", "--user", "-g", "--group", "-G", "--supp-group", "-s", "--shell", "-w",
+                           "--whitelist-environment")), 0),
+    "systemd-run": (frozenset(("-u", "--unit", "-p", "--property", "--description", "--slice", "-E", "--setenv", "-H",
+                               "--host", "-M", "--machine", "--uid", "--gid", "--nice", "--working-directory", "--on-active",
+                               "--on-boot", "--on-startup", "--on-unit-active", "--on-unit-inactive", "--on-calendar",
+                               "--service-type", "--timer-property", "--path-property", "--socket-property")), 0),
+    "chrt": (frozenset(("-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline")), 1),
+    "prlimit": (frozenset(("-p", "--pid", "-o", "--output")), 0),
     "strace": (frozenset(("-o", "-e", "-p", "-s", "-u", "-E", "-a", "-b", "-I", "-O", "-S", "-X", "-P")), 0),
     "ltrace": (frozenset(("-o", "-e", "-p", "-s", "-u", "-a", "-n")), 0),
     "unbuffer": (frozenset(), 0),
@@ -2129,6 +2195,9 @@ def _assigned_literals(root: str, name: str, dialect: str) -> Tuple[str, ...]:
     return tuple(a or b or c for a, b, c in re.findall(rx, root, flags))
 
 
+_BRACE_CAP = 64
+
+
 def _brace_alts(word: str) -> List[str]:
     out = [word]
     for _ in range(4):
@@ -2139,8 +2208,50 @@ def _brace_alts(word: str) -> List[str]:
                 nxt.append(w)
                 continue
             nxt += [w[:m.start()] + alt + w[m.end():] for alt in m.group(1).split(",")]
-        out = nxt[:64]
+        out = nxt[:_BRACE_CAP]
     return out
+
+
+def _define_function(ctx, name: str, body: str) -> None:
+    """Calls are read after the whole command is scanned, so one stored body cannot stand for two definitions."""
+    if ctx.functions.get(name, body) != body:
+        raise ParseError("function {} is defined twice".format(name))
+    ctx.functions[name] = body
+
+
+def _unquoted_brace(raw: str) -> bool:
+    """`raw` holds a `{..,..}` outside quotes and not as `${..}`: bash expands it. `'{a,b}'` stays one word."""
+    quote, depth, comma = "", 0, False
+    for i, c in enumerate(raw):
+        if quote:
+            quote = "" if c == quote else quote
+        elif c in "'\"":
+            quote = c
+        elif c == "{" and raw[i - 1:i] != "$":
+            depth, comma = depth + 1, False
+        elif c == "}" and depth:
+            if comma:
+                return True
+            depth -= 1
+        elif c == "," and depth:
+            comma = True
+    return False
+
+
+def _expand_braces(dialect, ws, vals):
+    """Bash expands `{a,b}` before the command runs, so `rm {a,b,c}.ess` has three operands (release review
+    2026-11-02: read as one file that does not exist, it counted no saves). Never the program word."""
+    if dialect != "bash" or not any("{" in v for v in vals[1:]):
+        return ws, vals
+    out_w, out_v = list(ws[:1]), list(vals[:1])
+    for w, v in zip(ws[1:], vals[1:]):
+        alts = _brace_alts(v) if not w.dyn or _BRACE1.search(v) else [v]
+        # Past the cap _brace_alts drops members: keep the whole word, which is judged as unresolved, never a part of it.
+        if len(alts) < 2 or len(alts) >= _BRACE_CAP or any(_BRACE1.search(a) for a in alts) or not _unquoted_brace(w.raw):
+            alts = [v]
+        out_w += [w] * len(alts)
+        out_v += alts
+    return out_w, out_v
 
 
 def _glob_word(base: str) -> bool:
@@ -2352,7 +2463,7 @@ class _Resolver:
         """`su ... -c CMD`, `script -c CMD`, `--command=CMD`: re-parse CMD; True if one was found."""
         v, n = self.v, len(self.v)
         for j in range(k, n):
-            if v[j] in ("-c", "--command") and j + 1 < n:
+            if (v[j] in ("-c", "--command") or re.fullmatch(r"-[lmpf]+c", v[j])) and j + 1 < n:
                 self.reparse(v[j + 1], "bash")
                 return True
             if v[j].startswith("--command="):
@@ -2447,7 +2558,7 @@ class _Resolver:
                     body = self.ctx.aliases.get(v[k] if self.d == "bash" else v[k].lower())
                     if body:
                         self._sub_run(body.split(), k)          # RT-A: an alias defined in the same command
-                    elif self.d == "bash" and not self.q[k] and v[k] in self.ctx.functions:
+                    elif self.d == "bash" and v[k] in self.ctx.functions:    # `"f"` calls f too; only aliases differ
                         # A function defined in the same command runs its BODY here, in the caller's scope: its cd
                         # moves the caller and its deletes run at the call site (as a literal eval would).
                         self.emit(p, k + 1)
@@ -2545,13 +2656,15 @@ class _Resolver:
                 argopts, positional = _WRAPPERS[p]
                 k += 1
                 while k < n and v[k].startswith("-") and v[k] != "--":
-                    if p == "flock" and v[k] in ("-c", "--command"):
+                    if p in ("flock", "runuser") and v[k] in ("-c", "--command"):
+                        break
+                    if p == "runuser" and (v[k].startswith("--command=") or re.fullmatch(r"-[lmpf]+c", v[k])):
                         break
                     k += 2 if v[k] in argopts else 1
                 if k < n and v[k] == "--":
                     k += 1
                 k += positional
-                if p == "flock" and self._reparse_after_c(k):  # flock FILE -c CMD
+                if p in ("flock", "runuser") and self._reparse_after_c(k):  # flock FILE -c CMD, runuser -l U -c CMD
                     return self.made
                 if p == "watch":                                # watch joins its words and runs `sh -c` on them
                     if k < n:
@@ -2753,8 +2866,8 @@ class _Resolver:
             words = [w for w in e.argv if not w.startswith("/")]
             src, new = (words[0], words[1]) if len(words) > 1 else ("", "")
         else:
-            s = ps_param(e, "Path", 0) or ps_param(e, "LiteralPath")
-            nn = ps_param(e, "NewName", 1)
+            s = ps_param(e, "path", 0, slot=("literalpath",)) or ps_param(e, "LiteralPath")
+            nn = ps_param(e, "newname", 1, before=(("path", "literalpath"),))
             src, new = (s[0] if s else ""), (nn[0] if nn else "")
         if not src or not new:
             return
@@ -3193,6 +3306,9 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
             keep = [j for j, w in enumerate(ws) if not (vals[j] == "--%" and not w.quoted)]   # stop-parsing token
             ws, vals = [ws[j] for j in keep], [vals[j] for j in keep]
             vals = ["-" + v[1:] if v[:1] in _PS_DASHES and not w.quoted else v for v, w in zip(vals, ws)]
+            vals = [_ListItem(v) if w.comma else v for v, w in zip(vals, ws)]
+        else:
+            ws, vals = _expand_braces(d, ws, vals)
         seg = t[rec.start:rec.end]
         stdin = "pipe" if rec.stage > 0 or rec.piped_from else ""
         bodies = [(h.body or "", h.quoted) for h in rec.heredocs]
@@ -3322,20 +3438,49 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
 _TEXT_SOURCES = frozenset(("echo", "write-output", "write-host", ""))   # printf: only a plain format (_printf_text)
 _PLAIN_ARG = re.compile(r"[A-Za-z0-9_./:@%+,=~-]+")
 _POSITIONAL = re.compile(r"\$(?:\{([1-9])\}|([1-9])|\{?([@*])\}?)")
+# In command position only: `echo shift` moves nothing.
+_ARGS_MOVED = re.compile(r"(?:^|(?P<lead>[;&|({\n)]))[ \t]*(?:(?:then|do|else|elif|builtin|command|!)[ \t]+)*(?:shift(?:[ \t]+(?:(?P<count>[0-9]+)|(?P<computed>[^\s;&|)}]+)))?"
+                         r"|(?P<set>set[ \t]+--?))(?=$|[;&|)}\s])")
+_BRANCHES = re.compile(r"(?:^|[;&|({\s])(?:if|while|until|for|case|select)(?=\s)|&&|\|\|")
+
+
+def _args_moved(body: str):
+    """Each move of the arguments. A `)` is command position only in a case arm, not after `$(date)` or in a comment."""
+    for m in _ARGS_MOVED.finditer(body):
+        if m.group("lead") != ")" or re.search(r"\bcase\b", body[:m.start()]):
+            yield m
 
 
 def _call_body(body: str, args, dynamic) -> str:
     """The body with $1..$9 / ${N} / $@ / $* replaced by the call's arguments where each is a plain literal word
     (letters, digits, path punctuation). Any other argument, or a missing one, leaves the reference in place: an
-    unknown value, judged as any unknown variable is."""
+    unknown value, judged as any unknown variable is. A `shift` in the body's straight line moves the arguments for the
+    text after it (release review 2026-11-02: `g() { shift; cd "$1"; }` read the wrong word). Anything else that moves
+    them (`set --`, a shift under a branch, loop, subshell or pipe, or by a computed count) depends on the run, so the
+    command refuses to parse: leaving the references unknown turned a deny into an allow (review round 2)."""
     plain = [a if not dyn and _PLAIN_ARG.fullmatch(a or "") else None for a, dyn in zip(args, dynamic)]
+    if _POSITIONAL.search(body):
+        for m in _args_moved(body):
+            if m.group("set") or m.group("computed") or _BRANCHES.search(body) or m.group("lead") in ("(", "|"):
+                raise ParseError("a function moves its arguments in a way that depends on the run")
 
-    def one(m):
-        if m.group(3):
-            return " ".join(plain) if plain and all(a is not None for a in plain) else m.group(0)
-        n = int(m.group(1) or m.group(2))
-        return plain[n - 1] if n <= len(plain) and plain[n - 1] is not None else m.group(0)
-    return _POSITIONAL.sub(one, body)
+    def fill(text, rest):
+        def one(m):
+            if rest is None:
+                return m.group(0)
+            if m.group(3):
+                return " ".join(rest) if rest and all(a is not None for a in rest) else m.group(0)
+            n = int(m.group(1) or m.group(2))
+            return rest[n - 1] if n <= len(rest) and rest[n - 1] is not None else m.group(0)
+        return _POSITIONAL.sub(one, text)
+
+    out, at, rest = [], 0, plain
+    for m in _args_moved(body):
+        out.append(fill(body[at:m.end()], rest))
+        at = m.end()
+        rest = rest[int(m.group("count") or 1):]
+    out.append(fill(body[at:], rest))
+    return "".join(out)
 
 
 _PRINTF_ESCAPES = {"n": "\n", "t": "\t", "\\": "\\"}
@@ -3381,13 +3526,18 @@ def _ps_reads_commands(e: Exec) -> bool:
 def _reads_code(argv) -> bool:
     """Whether an interpreter takes its PROGRAM from stdin (`python`, `python -`, `node`), rather than from -c/-e
     or a script file (then stdin is data)."""
+    skip = False
     for a in argv:
         if a in _CODE_OPTS:
             return False
+        if skip and "." not in a:                   # `python -X utf8` names no script; `perl -W tool.pl` does
+            skip = False
+            continue
         if a == "-":
             return True
         if not a.startswith("-"):
             return False
+        skip = a in ("-X", "-W", "--check-hash-based-pycs")
     return True
 _SCANNERS = {"bash": _Bash, "powershell": _Pwsh, "cmd": _Cmdexe}
 

@@ -65,6 +65,7 @@ NOT A DELETE: a command that only MENTIONS one (grep, rg, Select-String, echo, g
 """
 from __future__ import annotations
 
+import functools
 import os
 import posixpath
 import re
@@ -73,6 +74,7 @@ from typing import List, Mapping, NamedTuple, Optional, Tuple
 
 from . import paths, targets
 from .grep import _compile, grep
+from .shellparse import _ListItem, ps_param
 
 # ------------------------------------------------------------------------------------------- legacy text tests
 DESTROYER = (
@@ -90,12 +92,15 @@ INTERP_DELETE = (
     # G1 (RT-A): .NET / Ruby / Deno removal calls.
     r"|\bFileUtils\.(rm|remove)\w*|\bDeno\.remove\w*\s*\(|\b(File|Directory)\]?::Delete\s*\(|\.Delete\s*\("
 )
+# The other interpreters the parser names: julia rm(), R file.remove(), tcl `file delete`, Java and Groovy File. Never for
+# Python, whose calls are read by ast: `print("file delete failed")` and `cursor.delete()` were refused beside a root.
+INTERP_DELETE_OTHER = r"\brm\s*\(|\bfile\.remove\s*\(|\bfile\s+delete\b|\bFiles\.delete\w*\s*\(|\.deleteDir\s*\(|\.delete\s*\(\s*\)"
 # G1 (RT-A): code that LAUNCHES a process is judged like a delete only when the launched text also carries a delete
 # word, quoted or space-bounded (`os.system('rd /s /q X')`, `subprocess.run(['cmd','/c','rd',X])`). Priced: launch +
 # root alone denied 6 of 68,475 history items, all read-only analysis scripts (`automod archive list`, cosave reads).
 INTERP_LAUNCH = (
     r"\bos\.(system|popen|exec\w*|spawn\w*)\s*\(|\bsubprocess\.|\bchild_process\b|\b(exec|spawn)(File)?Sync\s*\("
-    r"|\b(system|shell_exec|passthru|proc_open)\s*\("
+    r"|\b(system|shell_exec|passthru|proc_open)\s*\(|\bdo shell script\b"
 )
 LAUNCH_DELETE_WORD = r"""(^|['"\s,\[(])(rm|rmdir|rd|del|erase|unlink|Remove-Item|ri|rimraf)(['"\s,\])]|$)"""
 
@@ -153,13 +158,14 @@ def recycle_targets(command: str) -> List[Tuple[str, str]]:
             out.append((m.group("bare").strip(), "bare"))
     return out
 
-DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "rimraf"))
+DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "del", "erase", "rd", "remove-item", "rimraf", "trash", "trash-put"))
 CMD_SWITCH_PROGRAMS = frozenset(("del", "erase", "rd", "rmdir"))
 _CMD_SWITCH = re.compile(r"/[A-Za-z?](:\S*)?")
 NPX = frozenset(("npx", "pnpx", "bunx"))
 PKG_RUNNERS = frozenset(("pnpm", "yarn", "bun", "npm"))
 _PYTHON = re.compile(r"(?:python|pypy|py)[0-9.]{0,8}w?")
-CODE_INTERPRETERS = frozenset(("node", "nodejs", "deno", "bun", "perl", "ruby", "php"))
+CODE_INTERPRETERS = frozenset(("node", "nodejs", "deno", "bun", "perl", "ruby", "php", "lua", "luajit", "rscript", "julia",
+                               "tclsh", "wish", "osascript", "jshell", "groovy", "ts-node", "tsx", "jython"))
 CODE_FLAGS = frozenset(("-c", "-e", "-E", "--eval", "-p", "--print", "-r", "-pe"))
 _PY_CODE_CLUSTER = re.compile(r"-[A-Za-z]{1,4}c")      # python -Bc CODE, -Ic CODE, -IBc CODE (G1)
 
@@ -178,6 +184,11 @@ _PS_VALUED = ("filter", "include", "exclude", "credential", "stream", "erroracti
               "outbuffer", "pipelinevariable", "ea", "wa", "ev", "wv", "ov", "ob", "pv", "iv", "infa")
 
 UNRESOLVED = None           # an operand the guard cannot place (pipeline input, a variable, ...)
+# Release review 2026-11-02: cmdlets that take their paths from the pipe, and the members `ForEach-Object <Name>` calls
+# on each piped item, change what the earlier stage named.
+_PIPED_CHANGERS = frozenset(("clear-content", "set-content", "add-content", "rename-item"))
+_PIPED_MEMBERS = frozenset(("delete", "moveto", "encrypt", "replace", "create", "createtext", "appendtext", "open",
+                            "openwrite"))
 _NOCWD = "c:/__skyguard_no_cwd__"
 
 
@@ -320,6 +331,20 @@ def _rimraf_after_runner(e) -> Optional[List[str]]:
 def operands(e) -> Optional[List[Optional[str]]]:
     """None: e deletes nothing. Otherwise its target words; UNRESOLVED stands for input it reads from a pipe."""
     p = e.program
+    if p == "gio" and e.argv[:1] in (("trash",), ("remove",)):
+        return [w for w in e.argv[1:] if not w.startswith("-")]
+    if p == "forfiles":
+        low = [w.lower() for w in e.argv]
+        run = next((e.argv[i + 1] for i, w in enumerate(low[:-1]) if w in ("/c", "-c")), "")
+        if re.search(r"(?i)\b(del|erase|rd|rmdir)\b", run):
+            return [next((e.argv[i + 1] for i, w in enumerate(low[:-1]) if w in ("/p", "-p")), ".")]
+        return None
+    if e.dialect == "powershell" and e.stdin_from == "pipe":
+        if p == "foreach-object" and any(m.lower() in _PIPED_MEMBERS for m in ps_param(e, "membername", 0)):
+            return [UNRESOLVED]
+        if p in _PIPED_CHANGERS and not ps_param(e, "path", None if p == "rename-item" else 0) and not ps_param(
+                e, "literalpath"):
+            return [UNRESOLVED]
     if p == "find.delete":
         return list(e.argv)
     if p in ("io.file.delete", "io.directory.delete"):
@@ -397,6 +422,8 @@ def interpreter_code(e) -> str:
         # Retain the existing conservative stdin scan: -i/PYTHONINSPECT and
         # a program that evaluates its input can execute a supplied body.
     code = []
+    if p == "deno" and e.argv[:1] == ("eval",) and len(e.argv) > 1:
+        code.append(e.argv[1])                            # deno eval CODE: a subcommand, not a flag
     for i, w in enumerate(e.argv):
         nxt = e.argv[i + 1] if i + 1 < len(e.argv) else ""
         if w in CODE_FLAGS or (re.fullmatch(r"-[A-Za-z]{1,4}[eE]", w) and p not in CODE_INTERPRETERS - {"perl",
@@ -419,33 +446,66 @@ def interpreter_code(e) -> str:
 # (and the callback forms), rmtree, remove_tree, FileUtils.rm_rf and friends, perl/php unlink. Only a literal name is
 # read; scan() resolves it where the code runs, so `python -c "shutil.rmtree('Data')"` from the install is the install's
 # Data folder, exactly as `rm -rf Data` is.
-_PY_DELETE_CALLS = frozenset(("rmtree", "remove", "unlink", "rmdir", "removedirs", "send2trash"))
+# Release review 2026-11-02: a move takes its source away, so shutil.move / os.rename / os.replace / Path(x).rename read
+# the same way, and fs.rename(Sync) by call text.
+_PY_DELETE_CALLS = frozenset(("rmtree", "remove", "unlink", "rmdir", "removedirs", "send2trash", "move", "rename",
+                              "replace", "renames"))
 _PY_DELETE_OWNERS = frozenset(("shutil", "os", "send2trash"))
 _INTERP_DELETE_LIT = re.compile(
-    r"""(?:\b(?:rm|rmdir|unlink)(?:Sync)?|\brmtree|\bremove_tree|\bFileUtils\.(?:rm_rf|rm_r|rm|remove_dir|remove_entry\w*)"""
+    r"""(?:\b(?:rm|rmdir|unlink|rename)(?:Sync)?|\brmtree|\bremove_tree|\bFileUtils\.(?:rm_rf|rm_r|rm|remove_dir|remove_entry\w*)"""
+    r"""|\bos\.remove|\bfile\.remove"""
     r"""|\bunlink)\s*\(?\s*(['"])([^'"\n]{1,400})\1""")
+_INTERP_RENAME_LIT = re.compile(r"""\brename(?:Sync)?\s*\(\s*(['"])([^'"\n]{1,400})\1\s*,\s*(['"])([^'"\n]{1,400})\3""")
+_PY_MOVE_CALLS = frozenset(("move", "rename", "replace", "renames"))
+
+
+@functools.lru_cache(maxsize=4)
+def python_nodes(code: str):
+    """Every node of `code`, parsed once: one decision read the same source seven times, and a long one-liner reached
+    3.5 s of CPU against a 2 s ceiling on a CI runner (2026-11-02). Read-only for callers. Parse errors are not cached."""
+    import ast
+    return tuple(ast.walk(ast.parse(code)))
 
 
 def interpreter_delete_targets(code: str, python: bool) -> List[str]:
-    """The literal names `code` deletes (see above); [] when Python code cannot be parsed (writes.scan refuses it)."""
+    """The literal names `code` deletes (see above); [] when Python code cannot be parsed (writes.scan refuses it if its text names a way to change a file)."""
+    return [word for word, _into in interpreter_removals(code, python)]
+
+
+def interpreter_removals(code: str, python: bool) -> List[Tuple[str, Optional[str]]]:
+    """(literal name `code` takes away, where a move puts it or None). A move that stays in the same protected area
+    is no delete, as `mv Data/a Data/b` is none: an atomic write-then-replace in the install was refused as one."""
     if not python:
-        return [m.group(2) for m in _INTERP_DELETE_LIT.finditer(code)]
+        out = []
+        for m in _INTERP_DELETE_LIT.finditer(code):         # each call's own destination: a delete of the same name has none
+            renamed = _INTERP_RENAME_LIT.match(code, m.start())
+            out.append((m.group(2), renamed.group(4) if renamed else None))
+        return out
     import ast
     if len(code) > 1024 * 1024:
         return []
     try:
-        tree = ast.parse(code)
+        nodes = python_nodes(code)
     except (SyntaxError, ValueError, RecursionError, MemoryError):
         return []
 
     def literal(node):
         return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
+    # What `import x as y` / `from x import y as z` call things, as writes._python_write_targets reads them.
+    modules, names = {}, {}
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            modules.update({a.asname or a.name: a.name for a in node.names})
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.update({a.asname or a.name: node.module + "." + a.name for a in node.names})
+
     def path_of(node):
         if isinstance(node, ast.Call) and node.args and not node.keywords and (
-                isinstance(node.func, ast.Name) and node.func.id == "Path" or isinstance(node.func, ast.Attribute)
+                isinstance(node.func, ast.Name) and "pathlib.Path" == names.get(node.func.id, "pathlib.Path" if node.func.id == "Path" else "")
+                or isinstance(node.func, ast.Attribute)
                 and node.func.attr == "Path" and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "pathlib"):
+                and modules.get(node.func.value.id, node.func.value.id) == "pathlib"):
             parts = [literal(a) for a in node.args]
             if all(x is not None for x in parts):
                 path_type = PurePosixPath if paths.POSIX_HOST else PureWindowsPath
@@ -453,28 +513,63 @@ def interpreter_delete_targets(code: str, python: bool) -> List[str]:
         return None
 
     out = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         f = node.func
-        if isinstance(f, ast.Attribute) and f.attr in ("unlink", "rmdir") and not node.args:
-            p = path_of(f.value)                                    # Path('Data/x').unlink()
+        if isinstance(f, ast.Attribute) and (f.attr in ("unlink", "rmdir") and not node.args or
+                                             f.attr in ("rename", "replace")):
+            p = path_of(f.value)                                    # Path('Data/x').unlink() / .rename('y')
             if p is not None:
-                out.append(p)
+                moved = f.attr in ("rename", "replace") and node.args and (literal(node.args[0]) or path_of(node.args[0]))
+                out.append((p, moved or None))
                 continue
-        named = isinstance(f, ast.Name) and f.id in _PY_DELETE_CALLS
+        launched = _launched_deletes(node, f, modules, names, literal)
+        if launched:
+            out += [(w, None) for w in launched]
+            continue
+        real = names.get(f.id, f.id) if isinstance(f, ast.Name) else ""
+        call = real.rsplit(".", 1)[-1]
+        named = isinstance(f, ast.Name) and call in _PY_DELETE_CALLS and ("." not in real or real.split(".", 1)[0] in _PY_DELETE_OWNERS)
         owned = (isinstance(f, ast.Attribute) and f.attr in _PY_DELETE_CALLS and isinstance(f.value, ast.Name)
-                 and f.value.id in _PY_DELETE_OWNERS)
+                 and modules.get(f.value.id, f.value.id) in _PY_DELETE_OWNERS)
         if not (named or owned):
             continue
+        call = call if named else f.attr
         arg = node.args[0] if node.args else next(
-            (k.value for k in node.keywords if k.arg in ("path", "paths", "name")), None)
+            (k.value for k in node.keywords if k.arg in ("path", "paths", "name", "src")), None)
         value = literal(arg) if arg is not None else None
         if value is None and arg is not None:
             value = path_of(arg)
         if value is not None:
-            out.append(value)
+            to = node.args[1] if len(node.args) > 1 else next((k.value for k in node.keywords if k.arg == "dst"), None)
+            out.append((value, (literal(to) or path_of(to)) if call in _PY_MOVE_CALLS and to is not None else None))
     return out
+
+
+def _launched_deletes(node, f, modules, names, literal) -> List[str]:
+    """The names a literal command line deletes when Python launches it: subprocess.run('rm -rf Data', shell=True),
+    os.system('rm x'), subprocess.run(['rm', '-rf', 'Data']). One plain command only; anything else stays unread."""
+    import ast
+    import shlex
+    real = names.get(f.id, f.id) if isinstance(f, ast.Name) else (
+        modules.get(f.value.id, f.value.id) + "." + f.attr if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) else "")
+    if not (real in ("os.system", "os.popen") or real.startswith("subprocess.")) or not node.args:
+        return []
+    first = node.args[0]
+    if isinstance(first, (ast.List, ast.Tuple)):
+        words = [literal(x) for x in first.elts]
+        if any(w is None for w in words):
+            return []
+    else:
+        text = literal(first)
+        try:
+            words = shlex.split(text) if text and not re.search(r"[;&|<>`$]", text) else []
+        except ValueError:
+            return []
+    if not words or re.split(r"[/\\]", words[0].lower())[-1].rsplit(".exe", 1)[0] not in DELETE_PROGRAMS:
+        return []
+    return [w for w in words[1:] if not w.startswith("-") and not (w.startswith("/") and len(w) == 2)]
 
 
 def substituted(e):
@@ -483,7 +578,9 @@ def substituted(e):
     if not e.subst:
         return e
     sub = dict(e.subst)
-    return e._replace(argv=tuple(sub.get(w, w) for w in e.argv),
+    # A substituted word stays in its comma list (`$d,b,c` is one PowerShell argument).
+    return e._replace(argv=tuple((_ListItem(sub[w]) if isinstance(w, _ListItem) else sub[w]) if w in sub else w
+                                 for w in e.argv),
                       redirects=tuple((op, sub.get(w, w)) for op, w in e.redirects))   # fix-unclear 4b
 
 
@@ -625,12 +722,18 @@ class Scan(NamedTuple):
     saves: Tuple[str, ...] = ()
 
 
+def _in_game_data(abs_path: str, roots) -> bool:
+    """Inside the install's Data folder. A cwd-local listing (`ls *.bak | xargs rm`) stays the priced known limit."""
+    low = abs_path.rstrip("/").lower() + "/"
+    return any(low.startswith(d.rstrip("/").lower() + "/data/") for d in roots.install_dirs)
+
+
 def _is_data_word(word: str) -> bool:
     return any(c.lower() == "data" for c in re.split(r"[/\\]+", word))
 
 
 LINK_PROGRAMS = frozenset(("ln", "new-item", "mklink", "subst"))
-MOVE_PROGRAMS = frozenset(("mv", "move-item", "io.file.move", "io.directory.move"))
+MOVE_PROGRAMS = frozenset(("mv", "move-item", "io.file.move", "io.directory.move", "io.file.replace"))
 _LINK_TYPES = ("junction", "symboliclink")
 
 
@@ -684,12 +787,12 @@ def _move_pairs(e) -> List[Tuple[str, str]]:
     """(source, destination) words for each move this exec makes: mv, Move-Item, cmd move, [IO.File]/[IO.Directory]
     ::Move."""
     p, argv = e.program, e.argv
-    if p in ("io.file.move", "io.directory.move"):
+    if p in ("io.file.move", "io.directory.move", "io.file.replace"):
         return [(argv[0], argv[1])] if len(argv) > 1 else []
     if p == "move-item":
         from .shellparse import ps_param
-        src = list(ps_param(e, "Path", 0)) + list(ps_param(e, "LiteralPath"))
-        dst = ps_param(e, "Destination", 1)
+        src = list(ps_param(e, "path", 0, slot=("literalpath",))) + list(ps_param(e, "LiteralPath"))
+        dst = ps_param(e, "destination", 1, before=(("path", "literalpath"),))
         if not src and e.stdin_from == "pipe":
             src = [UNRESOLVED]                            # B-I1: `Get-Item X | Move-Item -Destination D`
         return [(s, dst[0] if dst else ".") for s in src]
@@ -814,6 +917,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 if (ua is not None and targets.covers_protected(place(ua)[1], roots)) or (
                         ua is None and raw_reaches(uw, None, up.dialect, roots)):
                     return True
+                if ua is not None and _in_game_data(place(ua)[1], roots):    # `ls Data/* | xargs rm`, as `rm Data/*` is
+                    return True
         return False
 
     for i, e in enumerate(parsed.execs):
@@ -822,6 +927,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         e = substituted(e)
         code = interpreter_code(e)
         if code and resolved is None and (has(DESTROYER, code) or has(INTERP_DELETE, code) or (
+                not _PYTHON.fullmatch(e.program) and has(INTERP_DELETE_OTHER, code)) or (
                 has(INTERP_LAUNCH, code) and has(LAUNCH_DELETE_WORD, code))):
             for kind, rx in _root_regexes(roots):
                 if has(rx, code):
@@ -830,11 +936,14 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         if code and resolved is None:
             # guard3: a literal name the code deletes, resolved where the code runs (relative ones included).
             base = targets.exec_cwd(e, cwd, env) or ""
-            for w in interpreter_delete_targets(code, bool(_PYTHON.fullmatch(e.program))):
+            for w, into in interpreter_removals(code, bool(_PYTHON.fullmatch(e.program))):
                 a = targets.resolve_literal(w, base, env)
                 if a is None:
                     continue
                 kind, b = place(a)
+                d = targets.resolve_literal(into, base, env) if into else None
+                if d is not None and targets.zone(b, roots) in RULE_OF and targets.zone(d, roots) == targets.zone(b, roots):
+                    continue                                # stays where it was: not a delete, as with mv
                 if kind and not is_save(b, roots):          # a save keeps the save policy's own reading
                     resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
                     break

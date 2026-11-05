@@ -1,5 +1,7 @@
 # Development CI
 
+> For a development clone: `tests/` and `scripts/prepush-gate.py` are not in the release zip.
+
 CI uses the [core-owned policy](https://github.com/WingedGuardian/modding-agent-harness/blob/50a993ba807d4c1e513cedef19b709fa2cf91ce0/CONTRIBUTING.md),
 pinned independently of the runtime harness revision.
 

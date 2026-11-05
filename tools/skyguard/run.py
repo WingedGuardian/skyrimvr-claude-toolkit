@@ -226,7 +226,7 @@ def _codex(a, raw: str) -> int:
         _session_line(a, req.session_id, source=req.source, transcript=req.transcript_path)
         out, status, code = session.run_status(a.project, req.source, a.bash, audit, root=a.root_win or a.root)
         _session_snapshot(a.project, req.source, audit)
-        out = _disk_note(a.project) + out
+        out = session.with_charter(_disk_note(a.project) + out, a.project, req.session_id)
         _telemetry(a, Verdict("allow", "", "", status, code))
         _emit("SKYGUARD-OK\n" + codex.session_body(out))
         return 0
@@ -297,7 +297,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("agent", choices=sorted(ADAPTERS) + ["neutral"])
     ap.add_argument("role", choices=["protect-bash", "protect-files", "backup-before-edit",
-                                     "snapshot-before-tool", "session-kb-guard", "protect-mcp"]
+                                     "snapshot-before-tool", "session-kb-guard", "protect-mcp", "save-sentinel"]
                     + list(CODEX_ROLES))
     ap.add_argument("--root", default="")
     ap.add_argument("--root-win", default="")
@@ -366,8 +366,21 @@ def main(argv=None) -> int:
         v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)
         v = _saves(a, p, audit, v, p["tool_name"])          # an existing save DevBench overwrites is kept first
     elif a.role == "backup-before-edit":
-        backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit, "claude", p.get("session_id", ""))
+        kept = backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit, "claude", p.get("session_id", ""))
         v = Verdict()
+        if kept is backup.FAILED:           # never a block, but never silent: the edit goes ahead with no copy of the file
+            v = Verdict("allow", "", "NO BACKUP of {} could be taken before this edit (see .claude/backups/AUDIT_LOG.txt). "
+                        "Tell the user if the file matters.".format(p["file_path"]))
+    elif a.role == "save-sentinel":
+        # PostToolUse, after the call: report saves changed with no backup first (saves.py KNOWN LIMITS). Never a
+        # decision; an unreadable paths file costs only the declared config dirs, never the look itself.
+        from skyguard import save_sentinel
+        env = _declared_env(a)
+        roots = paths.roots(a.root, a.root_win, env if env is not None else {})
+        text, loud = save_sentinel.report_text(a.project, roots, dict(os.environ))
+        _telemetry(a, Verdict())
+        _emit(save_sentinel.render(text, loud))
+        return 0
     elif a.role == "snapshot-before-tool":
         env = _declared_env(a)                 # Task 15: the load order and INIs, then scripts
         _recovery(a, p, audit, None if env is None else paths.roots(a.root, a.root_win, env))
@@ -377,7 +390,7 @@ def main(argv=None) -> int:
         out, status, code = session.run_status(a.project, "" if p["empty"] else p["source"], a.bash, audit,
                                               root=a.root_win or a.root)
         _session_snapshot(a.project, "" if p["empty"] else p["source"], audit)
-        out = _disk_note(a.project) + out
+        out = session.with_charter(_disk_note(a.project) + out, a.project, p["session_id"])
         _telemetry(a, Verdict(status=status, code=code))
         session.export_env(p["session_id"], "claude")   # later Bash calls get SKYGUARD_SESSION_ID (Task 10)
         _emit(out)

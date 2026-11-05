@@ -426,7 +426,7 @@ return async ({ directory, client }) => {
 
     "experimental.chat.system.transform": async (_input, output) => {
       if (output && Array.isArray(output.system)) {
-        output.system.push(BANNER)
+        output.system.push(existsSync(adapter) ? BANNER : "GUARDS NOT LIVE: the guard adapter is missing, so every judged tool call will be refused until it is restored.")
         if (existsSync(join(directory, "KNOWLEDGEBASE.local.md"))) {
           try {
             const verdict = await ask("session", { tool: "preferences" }, {})

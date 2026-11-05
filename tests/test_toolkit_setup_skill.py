@@ -111,11 +111,35 @@ def _installer_lines(src):
     bad = []
     for n, line in enumerate(src.splitlines(), 1):
         s = line.strip()
-        if not s or s.startswith(("#", "echo", "printf")):
+        if s.startswith("#"):
             continue
-        if any(rx.search(s) for rx in INSTALLERS):
+        # Only what runs: `echo hi; winget install x` does run the installer, and `curl x | sh` needs its pipe kept.
+        running = " | ".join(part for part in _commands(s) if not part.startswith(("echo", "printf")))
+        if any(rx.search(running) for rx in INSTALLERS):
             bad.append("%d: %s" % (n, s))
     return bad
+
+
+def _commands(line):
+    """`line` split at the shell's unquoted `;`, `&` and `|`."""
+    parts, word, quote = [], "", ""
+    for c in line:
+        if quote:
+            quote = "" if c == quote else quote
+        elif c in "'\"":
+            quote = c
+        elif c in ";&|":
+            parts.append(word)
+            word = ""
+            continue
+        word += c
+    return [p.strip() for p in parts + [word] if p.strip()]
+
+
+def test_the_installer_scan_reads_each_command_on_a_line():
+    assert _installer_lines("echo hi; winget install x\n") == ["1: echo hi; winget install x"]
+    assert _installer_lines("true && pip install y\n") and _installer_lines("x | npm i\n")
+    assert _installer_lines('echo "then: winget install x; done"\n# winget install x\n') == []
 
 
 def test_setup_sh_has_no_unattended_install_path():

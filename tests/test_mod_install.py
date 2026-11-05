@@ -422,7 +422,7 @@ def test_update_across_drives_copies_verifies_and_only_then_recycles(tmp_path, s
     assert _tree(aside[0]) == before, "the aside folder must be the whole old folder, moved in one rename"
     assert (old / "ExampleMod.esp").read_bytes() == b"new plugin" and not (old / "Stale.dll").exists()
     assert "sent to the Recycle Bin" in out.out
-    notice = "Moving {} to the Recycle Bin; if Windows says it is too big for the bin, it will ask you before".format(
+    notice = "Moving {} to the Recycle Bin; if it is too big for the bin it stays where it is.".format(
         aside[0])
     assert notice in out.out and out.out.index(notice) < out.out.index("was sent to the Recycle Bin"), out.out
 
@@ -560,3 +560,64 @@ def test_a_failure_after_the_old_folder_moved_names_the_backup(tmp_path, sevenz,
     assert str(kept[0]) in out.err and "partial" in out.err, out.err
     manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
     assert "aborted before any write" not in manifest and "# STATUS: FAILED after" in manifest, manifest
+
+
+def test_a_relative_data_folder_still_writes_absolute_manifest_rows(tmp_path, sevenz, game, monkeypatch):
+    mod = _in_process(monkeypatch, tmp_path, sevenz, game)
+    data = os.path.relpath(str(game / "Data"), str(tmp_path))
+    arc = archive(tmp_path, [{"path": "Data/ExampleMod.esp", "data": "x"}])
+    monkeypatch.chdir(tmp_path)
+    assert mod.main([str(arc), "--data", data, "--apply"]) == 0
+    manifest = (tmp_path / "records" / "ExampleMod.files.txt").read_text(encoding="utf-8")
+    rows = [l for l in manifest.splitlines() if l and not l.startswith("#")]
+    assert rows and all(os.path.isabs(r.split("	")[-1].split("  ")[-1]) for r in rows), manifest
+
+
+def test_mo2_update_keeps_a_config_the_archive_does_not_hold(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    (old / "MCM" / "Settings").mkdir(parents=True)
+    (old / "MCM" / "Settings" / "Example.ini").write_bytes(b"made in game\n")
+    r = run(archive(tmp_path, ENTRIES), "--update", "--apply", env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (old / "MCM" / "Settings" / "Example.ini").read_bytes() == b"made in game\n"
+    assert "KEPT" in line(r.stdout, "Example.ini"), r.stdout
+    assert not (old / "Stale.dll").exists(), "only configs carry over"
+
+
+def test_mo2_update_with_a_game_root_config_does_not_stop_after_moving_the_old_folder(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    (game / "enblocal.ini").write_bytes(b"mine\n")
+    entries = ENTRIES + [{"path": "Root/enblocal.ini", "data": "theirs\n"}]
+    r = run(archive(tmp_path, entries), "--update", "--apply", "--game-root-files",
+            env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
+    assert r.returncode == 0 and "Traceback" not in r.stderr, r.stdout + r.stderr
+    assert (old / "ExampleMod.esp").read_bytes() == b"new plugin"
+    assert (game / "enblocal.ini").read_bytes() == b"mine\n"
+
+
+def test_mo2_update_does_not_keep_a_file_the_last_install_wrote_unchanged(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    env = env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods)
+    mine = old / "Old.ini"
+    mine.write_bytes(b"shipped\n")
+    records = tmp_path / "records"
+    records.mkdir(parents=True)
+    manifest = "{}  {}\n".format(__import__("hashlib").sha256(b"shipped\n").hexdigest(), mine)
+    (records / "ExampleMod.files.txt").write_text(manifest, encoding="utf-8")
+    r = run(archive(tmp_path, ENTRIES), "--update", "--apply", env=env)
+    assert r.returncode == 0 and not mine.exists(), r.stdout + r.stderr
+
+
+def test_mo2_update_does_not_report_its_own_meta_ini_as_an_old_file(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    r = run(archive(tmp_path, ENTRIES), "--update", "--apply", env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
+    assert r.returncode == 0 and (old / "meta.ini").is_file(), r.stdout + r.stderr
+    assert not [line for line in r.stdout.splitlines() if "KEPT" in line and "meta.ini" in line], r.stdout
+
+
+def test_mo2_update_does_not_keep_old_distribution_files(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    (old / "Foo_DISTR.ini").write_bytes(b"Spell = x\n")
+    r = run(archive(tmp_path, ENTRIES), "--update", "--apply", env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
+    assert r.returncode == 0 and not (old / "Foo_DISTR.ini").exists(), r.stdout + r.stderr
+

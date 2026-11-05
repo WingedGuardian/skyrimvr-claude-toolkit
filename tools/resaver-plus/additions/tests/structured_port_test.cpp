@@ -98,6 +98,12 @@ int main(){
         Check(result.o.at("deltaVerified").b&&!result.o.at("wroteFile").b&&sample.papyrus()->instances[0].data->vars[0].value==1,"variable dry-run simulates exact targeted value without disk write");
         Check(SaveFile::parse(sample.serialize(),sample.cosave)->papyrus()->instances[0].data->vars[0].value==1,"edited primitive survives native serialization/parser");
     }
+    {
+        auto sample=Make();Edit("set-var",sample,Parse("set-var",{"F123456789ABCDEF","0","010","--type","int"}));
+        Check(sample.papyrus()->instances[0].data->vars[0].value==10,"a zero-padded integer is decimal, not octal");
+        auto hexed=Make();Edit("set-var",hexed,Parse("set-var",{"F123456789ABCDEF","0","0x10","--type","int"}));
+        Check(hexed.papyrus()->instances[0].data->vars[0].value==16,"an 0x integer stays hexadecimal");
+    }
     for(auto type:{"int","float","str"}){
         auto sample=Make();const auto value=std::string(type)=="int"?"-42":std::string(type)=="float"?"1.25":"synthetic string";
         Edit("set-var",sample,Parse("set-var",{"F123456789ABCDEF","0",value,"--type",type}));
@@ -150,6 +156,64 @@ int main(){
         auto second=Make();Check(Run("changeform-diff",sample,{"second","--quests"},&second).o.at("changedCount").n==0,"native quest diff unchanged");
         second.changeForms[0].changeFlags|=1u<<26;second.changeForms[0].data.push_back(1);second.changeForms[0].length1++;
         Check(Run("changeform-diff",sample,{"second","--quests"},&second).o.at("changedCount").n==1,"native quest diff detects added flag and payload");
+    }
+    {
+        auto full=Make();auto fewer=Make();fewer.changeForms.erase(fewer.changeForms.begin());
+        auto gone=Run("changeform-diff",full,{"second","--quests"},&fewer);
+        Check(gone.o.at("removed").a.size()==1&&gone.o.at("added").a.empty(),"native quest diff names a quest only the first save has");
+        auto gained=Run("changeform-diff",fewer,{"second","--quests"},&full);
+        Check(gained.o.at("added").a.size()==1&&gained.o.at("removed").a.empty(),"native quest diff names a quest only the second save has");
+    }
+    {   // The Opus review of v4.0.0.
+        auto sample=Make();bool refused=false;
+        try{Edit("set-global",sample,Parse("set-global",{"05000123","99.5"}));}catch(const std::exception&){refused=true;}
+        Check(refused,"a bare id with another plugin's byte does not edit this global");
+        auto named=Make();Edit("set-global",named,Parse("set-global",{"01000123","99.5"}));
+        Check(Run("dump",named,{"globals"}).o.at("items").a[0].o.at("value").n==99.5,"a bare id with its own byte edits it");
+        auto low=Make();Edit("set-global",low,Parse("set-global",{"000123","99.5"}));
+        Check(Run("dump",low,{"globals"}).o.at("items").a[0].o.at("value").n==99.5,"a bare low id still matches");
+    }
+    {
+        auto flagged=Make();flagged.problems.push_back("layout does not add up");
+        auto j=Run("info",flagged);
+        Check(j.o.at("parseProblems").n==1&&j.o.at("parseProblemSamples").a.size()==1,"a read says what the parser flagged");
+        auto clean=Make();Check(!Run("info",clean).o.count("parseProblems"),"a clean read does not mention problems");
+    }
+    {
+        auto a=Make();a.formIDs={0x01000123,0x01000456};auto b=Make();b.formIDs={0x01000456,0x01000123};
+        ChangeForm qa;qa.refID.data=1;qa.typeField=a.changeForms[0].typeField;qa.changeFlags=1;Writer w;w.u8(1);cf::SetBody(qa,w.buf);
+        auto qb=qa;qb.refID.data=2;
+        a.changeForms={qa};b.changeForms={qb};
+        Check(Run("changeform-diff",a,{"second","--quests"},&b).o.at("added").a.empty(),"the same form under another table index is the same quest");
+        auto c=Make();c.formIDs={0x01000456,0x01000123};c.changeForms={qa};
+        auto moved=Run("changeform-diff",a,{"second","--quests"},&c);
+        Check(moved.o.at("added").a.size()==1&&moved.o.at("removed").a.size()==1,"the same index naming another form is another quest");
+        auto p=Make();p.formIDs={0x01000123};p.changeForms={qa};auto q=Make();q.formIDs={0x02000123};q.changeForms={qa};
+        auto one=Run("changeform-diff",p,{"second","00000123"},&q);
+        Check(!one.o.at("found").b&&one.o.count("reason"),"a single-form diff does not pair two forms sharing low bytes");
+        auto own=Run("changeform-diff",p,{"second","00000123"},&p);
+        Check(own.o.at("found").b,"a single-form diff still pairs the same form");
+    }
+    {
+        auto sample=Make();bool refused=false;
+        try{Run("dump",sample,{"activescripts","--script","absent"});}catch(const std::exception&){refused=true;}
+        Check(refused,"a filter the subsystem cannot apply is refused");
+        Check(Run("dump",sample,{"scriptinstances","--script","absent"}).o.at("items").a.empty(),"a filter it can apply still works");
+    }
+    {
+        auto sample=Make();auto hits=Run("find",sample,{"e"}).o.at("hits").a;bool script=false;
+        for(const auto& h:hits)script=script||h.o.at("kind").s=="script";
+        Check(script,"hex-valid text still finds a script by name");
+    }
+    {
+        auto sample=Make();bool refused=false;
+        try{Edit("set-var",sample,Parse("set-var",{"ABCDEF1234567890","0","5","--type","int"}));}catch(const std::exception&){refused=true;}
+        Check(refused,"--type does not overwrite a reference with a primitive");
+    }
+    {
+        auto sample=Make();SuspendedStack lost;lost.id=1;sample.papyrus()->suspended1.push_back(lost);
+        auto j=Run("writer-scan",sample);
+        Check(!j.o.at("complete").b&&j.o.at("unreadEntries").n==1,"writer-scan says what it could not read");
     }
     Reject("set-var",{"1","0","true","--apply"},"apply requires explicit output");
     Reject("clean",{"a","b"},"multiple outputs rejected");

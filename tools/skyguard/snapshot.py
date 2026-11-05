@@ -134,8 +134,10 @@ def scan(project, deadline=None):
             d, rel = stack.pop()
             try:
                 it = os.scandir(d)
-            except OSError:
+            except FileNotFoundError:
                 continue
+            except OSError:
+                return out, linked, True            # not listed is not deleted: this walk says nothing about what is gone
             with it:
                 for k, e in enumerate(it):
                     if deadline is not None and k % 256 == 255 and _walk_clock() >= deadline:

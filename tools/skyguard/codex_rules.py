@@ -52,6 +52,9 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
     "shell.S-SAVE-UNKNOWN": ("hook_only", _PATH + " (a wildcard the hook lists at run time)"),
     "shell.S-SAVE-STORE": ("hook_only", _PATH + " (including ancestors of permanent recovery data)"),
     "write.W-SAVE-STORE": ("hook_only", "a file write to permanent recovery data, not a command"),
+    # User ruling 2026-10-31: the save-lock switch is the user's alone.
+    "shell.S-SAVE-LOCK": ("hook_only", _PATH),
+    "write.W-SAVE-LOCK": ("hook_only", "a file write, not a command"),
     "shell.S-SAVE-BACKUP-FAILED": ("hook_only", "the backup's own failure at run time, not a command"),
     "shell.S-SAVE-OPAQUE": ("hook_only", _PATH + " (and the program word is one no prefix can name)"),
     "shell.S-OPAQUE-PROTECTED": ("hook_only", _PATH + " (and the program word is one no prefix can name)"),

@@ -228,12 +228,13 @@ class DoneTest(Base):
     def test_live_state_entry_blocks(self):
         self.assertIn("Live state", self.done(self.task("souls-run"), tokens={"souls-run"}))
 
-    def test_live_state_reads_entry_lines_only(self):
+    def test_live_state_reads_its_own_block_but_not_a_whole_output_root(self):
+        root = self.cfg["agent_output"][0].replace("\\", "/")
         (self.d / "CLAUDE.md").write_text(
-            "## Live state\n\nInstructions mention `_CLAUDE_OUTPUT` as an example.\n\n"
-            "- **Souls (date):** holding `souls-run`, restore before play.\n\n## Next section\n- `not-live`\n",
-            encoding="utf-8")
-        self.assertEqual({"souls-run"}, h.live_state_tokens(self.cfg))
+            "## Live state\n\nInstructions mention `" + root + "` as an example.\n\n"
+            "- **Souls (date):** holding `souls-run`, restore before play.\n\nA plain line holds `plain-run`.\n\n"
+            "## Next section\n- `not-live`\n", encoding="utf-8")
+        self.assertEqual({"souls-run", "plain-run"}, h.live_state_tokens(self.cfg))
 
     def test_rb_cwd_blocks(self):
         t = self.task()

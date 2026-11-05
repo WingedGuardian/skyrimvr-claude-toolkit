@@ -340,7 +340,12 @@ def apply(doc, cfg, recycler, approved_sha256, protect=lambda p: ''):
         if not target.exists():
             partial = target.with_suffix('.partial')
             # Exclusive creation refuses an interrupted/competing writer.
-            with partial.open('xb') as stream:
+            try:
+                stream = partial.open('xb')
+            except FileExistsError:
+                raise Refused('{} is left from an earlier archive run, or another run is writing it; once none is, '
+                              'recycle it and run this again (the original backup was not touched)'.format(partial))
+            with stream:
                 with zipfile.ZipFile(stream, 'w', zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as z:
                     for row in a['files']:
                         z.write(p / row['path'], row['path'])
@@ -465,14 +470,21 @@ def prune(doc, cfg, approved_sha256, recycler=None):
         failures = {p:results.get(p, 'no recycler result') for p in removed
                     if results.get(p, 'no recycler result') is not None}
         if failures:
+            # Never invalidate restore receipts for an archive the recycler refused. Those it DID take are gone, and a
+            # record with neither its archive nor a tombstone fails review and blocks every later prune of the vault.
+            gone = {rid for row in doc['objects'] if str(plain_path(row['path'])) not in failures for rid in row['record_ids']}
+            _retire(doc, dest, approved_sha256, gone)
             raise Refused('backup recycling incomplete: {} recycled, {} failed/left in place: {}'.format(
                 len(removed)-len(failures), len(failures), failures))
-    # Never invalidate restore receipts for an archive the recycler refused.
+    _retire(doc, dest, approved_sha256)
+    return removed
+
+
+def _retire(doc, dest, approved_sha256, only=None):
     for row in doc['records']:
         tomb = dest / 'retired' / (row['id'] + '.json')
-        if not tomb.exists():
+        if (only is None or row['id'] in only) and not tomb.exists():
             write_json(tomb, dict(row, retired_at=time.time(), approved_plan_sha256=approved_sha256))
-    return removed
 
 
 def restore(receipt, destination):

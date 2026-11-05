@@ -195,7 +195,7 @@ def test_every_hook_locates_its_install_with_the_same_block():
     protect-bash only: the drive-spelling and MSYS-mount tests in test_hooks.py. That covers the other
     four hooks only if they carry the SAME code (comments aside), so a drift in one of them goes red here."""
     hooks = sorted(HOOK_DIR.glob("*.sh"))
-    assert len(hooks) == 6, "expected six hooks -- this test is stale"
+    assert len(hooks) == 7, "expected seven hooks -- this test is stale"
     blocks = {}
     for h in hooks:
         text = h.read_text(encoding="utf-8")

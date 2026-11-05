@@ -96,7 +96,7 @@ DEFAULTS = {
                         "CMakeFiles", "vcpkg_installed", "buildtrees"],
     "build_exts": [".obj", ".pch", ".ilk", ".iobj", ".ipdb", ".tlog", ".idb"],
     "active_hours": 48,
-    # code fingerprint (housekeep_daily.code_sha256: housekeep, housekeep_archive, housekeep_daily) whose
+    # code fingerprint (housekeep_daily.code_sha256: housekeep, housekeep_archive, housekeep_backups, housekeep_daily) whose
     # dry-run output the user has reviewed. housekeep_daily.py APPLIES only
     # when the code still matches; otherwise it dry-runs and writes REVIEW-NEEDED.md (2026-10-28: a new rule acted
     # on its first run, unreviewed, and took a library a live build needed).
@@ -278,7 +278,7 @@ def evidence_links(cfg) -> set:
     file is never planned for anything."""
     links = set()
     prefixes = []                                # root-relative spellings (resolved against the root)
-    roots = [_abs(cfg, r) for r in cfg["agent_output"] + cfg["staging_roots"]]
+    roots = [_abs(cfg, r) for r in [*cfg["agent_output"], *cfg["staging_roots"], *cfg.get("archive_roots", {})]]
     for root in roots:
         try:
             rel = os.path.relpath(os.path.abspath(str(root)), os.path.abspath(str(cfg["root"])))
@@ -360,6 +360,9 @@ class Guard:
             if root.is_dir():
                 self.tracked.update(tracked_files(root))
         self.links = evidence_links(cfg)
+        # A doc line naming the output root itself (`out/*.log`, `out/<task>/README.md`) protects no file under it: every
+        # finished task would otherwise read as linked evidence, forever, with nothing said.
+        self.output_roots = {_key(_abs(cfg, r)) for r in cfg["agent_output"]}
         self.globs = [g.lower() for g in cfg["protected_globs"]]
 
     def why_protected(self, path) -> str:
@@ -391,7 +394,7 @@ class Guard:
         k = _key(p)
         if k in self.tracked:
             return "git-tracked"
-        if k in self.links:
+        if k in self.links or any(k.startswith(x + os.sep) for x in self.links if x not in self.output_roots):
             return "linked evidence"
         if any(fnmatch.fnmatch(low, g) for g in self.globs):
             return "protected_globs"
@@ -457,18 +460,26 @@ def live_state_tokens(cfg) -> set:
         except OSError:
             continue
         m = re.search(r"^## Live state.*?$(.*?)(?=^## |\Z)", text, re.M | re.S)
-        if m:                                   # entry lines only: the block's own instructions name example paths
-            entries = "\n".join(ln for ln in m.group(1).splitlines() if ln.lstrip().startswith(("- ", "* ")))
-            toks |= {t.replace("\\", "/").rstrip("/").lower() for t in re.findall(r"`([^`\n]+)`", entries)}
-    return toks
+        if m:
+            toks |= {t.replace("\\", "/").rstrip("/").lower() for t in re.findall(r"`([^`\n]+)`", m.group(1))}
+    # The block's own instructions may name a whole output root as an example; that holds no one task. A session's
+    # line need not be a bullet (release review 2026-11-02: the install's block only asks for "one line per session").
+    whole = {str(r).replace("\\", "/").rstrip("/").lower() for r in cfg.get("agent_output", ())}
+    return toks - whole
 
 
 def rb_job_cwds() -> list:
     p = Path(os.path.expanduser("~")) / ".claude" / "tools" / "resource-budget" / "ledger.json"
     try:
-        return [_key(e["cwd"]) for e in json.loads(p.read_text(encoding="utf-8")).get("entries", []) if e.get("cwd")]
-    except (OSError, ValueError, AttributeError, TypeError):
-        return []
+        text = p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []                               # no budget tool here: no jobs to hold for
+    except OSError:
+        return None
+    try:
+        return [_key(e["cwd"]) for e in json.loads(text).get("entries", []) if e.get("cwd")]
+    except (ValueError, AttributeError, TypeError):
+        return None                             # unreadable is not "nothing is running": is_done holds the work
 
 
 def is_done(task: Path, idle_days: float, tokens: set, cwds: list, guard) -> str:
@@ -476,6 +487,8 @@ def is_done(task: Path, idle_days: float, tokens: set, cwds: list, guard) -> str
     caller. Written-recently is the weakest signal (a read leaves no mtime), so every other gate is independent."""
     if (task / KEEP_PIN).exists():
         return "pinned (.housekeep-keep)"
+    if cwds is None:
+        return "the rb ledger could not be read, so a running job may work here"
     name = task.name.lower()
     path = str(task).replace("\\", "/").lower()
     if any(t == name or path.endswith("/" + t) or t.endswith("/" + name) or (len(t) > 8 and t in path)
@@ -550,8 +563,8 @@ def archive_selection(cfg, guard, tasks, now, held=None, inventory=None) -> tupl
             continue
         inventory["candidates_inspected"] += 1
         total += fp[1]
-        if (t / "ARCHIVED.md").exists() and fp[1] < 1 << 20:
-            keep("kept: already archived (stub only)", fp[1], from_root)
+        if (t / "ARCHIVED.md").exists():        # any size: linked evidence or a pin can keep more than a stub
+            keep("kept: already archived", fp[1], from_root)
             continue
         idle = (now - wrote) / DAY if wrote else 0.0           # idleness: writes
         if read > now - cfg["read_veto_hours"] * 3600:         # but anything reading here right now blocks it
@@ -622,6 +635,26 @@ def walk_files(target: Path, strict=False):
 # before goes to the Recycle Bin), although the store sits under .claude/backups/. Only this one tool store: saves
 # inside it, a backup folder inside a stamp, and every other backup folder stay Forever.
 ROLLING_SNAPSHOT_STORE = "auto_snapshots"
+
+
+def under_pin(path: Path, top: Path) -> bool:
+    """A .housekeep-keep in this file's folder or any folder up to and including `top`."""
+    for parent in path.parents:
+        if (parent / KEEP_PIN).exists():
+            return True
+        if parent == top:
+            return False
+    return False
+
+
+def archive_keeps(task: Path, guard) -> list:
+    """What an archive leaves in place (user ruling 2026-11-02): every Forever name, and everything under a nested pin.
+    The zip still holds a verified copy; only the local retirement skips them, so a baseline never moves from its path."""
+    keep = []
+    for dp, ds, fs in os.walk(task):
+        pinned = under_pin(Path(dp) / "x", task)
+        keep += [_key(os.path.join(dp, f)) for f in fs if pinned or guard.why_protected(os.path.join(dp, f))]
+    return keep
 
 
 def folder_protection(folder: Path, guard) -> str:
@@ -777,10 +810,19 @@ def manifest_references(cfg):
                     if "backups" in Path(dp).relative_to(root).parts:
                         continue
                     raise ValueError("unknown manual-install manifest format: " + name)
-                text = path.read_text(encoding="utf-8-sig")
+                # A whole mod folder kept by `mod-install --update` is payload, whatever its files are called: a mod's
+                # own manifest.json, or a config in another encoding, turned staging cleanup off for good.
+                if "mod-folder" in Path(dp).relative_to(root).parts:
+                    continue
+                in_backups = root == TOOLKIT_ROOT / ".claude/backups/manual-installs" or "backups" in Path(dp).relative_to(root).parts
+                try:
+                    text = path.read_text(encoding="utf-8-sig")
+                except UnicodeDecodeError:
+                    if in_backups and path.suffix.lower() == ".json":
+                        continue
+                    raise ValueError("unreadable manual-install manifest: " + name) from None
                 if path.suffix.lower() == ".json":
                     # Backup configs are payloads unless their name or top-level shape claims a manifest.
-                    in_backups = root == TOOLKIT_ROOT / ".claude/backups/manual-installs" or "backups" in Path(dp).relative_to(root).parts
                     named_manifest = name.lower() in ("manifest.json", "rollback.json") or name.lower().endswith(".manifest.json")
                     try:
                         document = json.loads(text)
@@ -986,6 +1028,9 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
             if why:
                 count("kept: protected ({})".format(why), size)
                 continue
+            if under_pin(f, task):
+                count("kept: pinned (.housekeep-keep)", size)
+                continue
             if st.st_nlink != 1:
                 count("kept: already hard-linked elsewhere (ownership unknown)", size)
                 continue
@@ -1071,6 +1116,9 @@ def plan(cfg, guard: Guard | None = None, now: float | None = None, only=None) -
                     s = f.stat().st_size
                     if f.suffix.lower() == ".gz" or s < 65536:
                         count("kept: launch log, recent or already compressed", s)
+                        continue
+                    if not has_recycle_bin():    # the original stays, so the next plan would meet its own .gz and fail
+                        count("kept: launch log (no Recycle Bin on this platform)", s)
                         continue
                     act({"class": "gzip", "path": str(f), "bytes": s, "hash": blake(f)},
                         "plan: launch log -> gzip (original to Recycle Bin)")
@@ -1192,7 +1240,14 @@ def print_coverage(doc):
             print("  HELD {} ({})".format(item["path"], item["reason"]))
 
 
-def print_rows(rows: dict, title: str):
+def accounting(rows: dict, actions) -> str:
+    """The plan rows against the actions behind them, two totals built separately: `rows sum` used to compare a total with
+    itself and could not fail."""
+    planned = sum(v for k, v in rows.items() if k.startswith("plan"))
+    return "OK" if planned == sum(a["bytes"] for a in actions) else "ACCOUNTING MISMATCH"
+
+
+def print_rows(rows: dict, title: str, actions=None):
     total = sum(rows.values())
     print("{}: {:.2f} GiB logical file bytes scanned (hard links included)".format(title, total / GIB))
     for k in sorted(rows, key=lambda k: (not k.startswith("plan"), k)):
@@ -1200,8 +1255,8 @@ def print_rows(rows: dict, title: str):
     kept = sum(v for k, v in rows.items() if not k.startswith("plan"))
     print("  {:>9.2f} GiB  (left alone, all 'kept' rows)".format(kept / GIB))
     planned = total - kept
-    print("  {:>9.2f} GiB  (planned)   rows sum: {}".format(planned / GIB, "OK" if planned + kept == total
-                                                              else "ACCOUNTING MISMATCH"))
+    print("  {:>9.2f} GiB  (planned){}".format(planned / GIB, "" if actions is None else
+                                               "   rows match the actions: " + accounting(rows, actions)))
 
 
 # --------------------------------------------------------------------------- applying
@@ -1224,6 +1279,14 @@ def under_test_harness() -> bool:
     if os.environ.get("HOUSEKEEP_REAL_BIN_IN_TESTS"):
         return False
     return bool(os.environ.get("PYTEST_CURRENT_TEST")) or bool(os.environ.get("HARNESS_FIXTURE_ROOT"))
+
+
+def _recycle_batch(recycler, batch) -> dict:
+    """A shell call that outlives its timeout is every item's failure to report, never a traceback."""
+    try:
+        return recycler(batch)
+    except subprocess.TimeoutExpired as exc:
+        return {str(p): "the Recycle Bin call timed out ({} s): check this item".format(exc.timeout) for p in batch}
 
 
 def recycle(paths) -> dict:
@@ -1250,7 +1313,7 @@ def recycle(paths) -> dict:
     # suppresses confirmations, and the confirmation it suppresses is the one Windows shows when an item is too big for
     # the bin and would be destroyed instead. FOF_WANTNUKEWARNING (0x4000) brings exactly that prompt back while
     # FOF_NOCONFIRMATION (0x10) still skips "move to the Recycle Bin?". FOF_ALLOWUNDO (0x40) is the Recycle Bin.
-    # For a local item too big for its bin, the user's answer decides; "No" leaves the item in place.
+    # An item too big for its bin is refused before this call (bin_refusal) and stays in place; the flag is for a race.
     # NOERRORUI suppresses error dialogs. WANTNUKEWARNING is NOT a guarantee: MEASURED 2026-10-31, a file on a
     # network share was destroyed silently (rc 0, no dialog) with these flags AND without 0x400. bin_refusal() above
     # is the only thing keeping no-bin locations out of this call; never loosen it on the strength of this flag.
@@ -1442,7 +1505,7 @@ def bin_capacity(path: str):
 
 
 def _set_readonly(path):
-    os.chmod(path, stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH)
+    os.chmod(path, stat.S_IMODE(os.stat(path).st_mode) & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
 
 
 class _Memo:
@@ -1712,7 +1775,7 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
                 elif cls == "archive":
                     ha = _archive_module()
                     k = _key(a["path"]) + os.sep
-                    extra = [x for x in guard.tracked | guard.links if x.startswith(k)]
+                    extra = [x for x in guard.tracked | guard.links if x.startswith(k)] + archive_keeps(Path(a["path"]), guard)
                     archived.append((a, ha.archive_folder(Path(a["path"]), Path(a["nas"]), None, extra)))
                 else:
                     to_recycle.append(a)
@@ -1735,7 +1798,7 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
             victims = [str(v) for _, rec in archived for v in rec["victims"]]
             res = {}
             for i in range(0, len(victims), RECYCLE_BATCH):
-                res.update(recycler(victims[i:i + RECYCLE_BATCH]))
+                res.update(_recycle_batch(recycler, victims[i:i + RECYCLE_BATCH]))
             for a, rec in archived:
                 left = {v: res.get(str(v), "no result reported") for v in rec["victims"]}
                 left = {str(v): e for v, e in left.items() if e}
@@ -1761,7 +1824,9 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
                     if a['class'] == 'snapshot' and any(
                             other['path'] == a.get('duplicate_of') for other in plan_doc['actions']):
                         why = 'retained snapshot is also scheduled for removal'
-                except (OSError, ValueError) as exc:
+                except Exception as exc:
+                    if not isinstance(exc, (OSError, ValueError)) and type(exc).__name__ != "ArchiveError":
+                        raise
                     why = 'final replacement proof failed: '+str(exc)
                 if why:
                     print('  REFUSED  {}  ({})'.format(a['path'], why))
@@ -1772,7 +1837,7 @@ def apply(plan_doc: dict, cfg, only=None, recycler=recycle, now: float | None = 
             paths = [a["path"] for a in to_recycle]
             res = {}
             for i in range(0, len(paths), RECYCLE_BATCH):
-                res.update(recycler(paths[i:i + RECYCLE_BATCH]))
+                res.update(_recycle_batch(recycler, paths[i:i + RECYCLE_BATCH]))
             for a in to_recycle:
                 err = res.get(a["path"], "no result reported")
                 if err:
@@ -1823,10 +1888,14 @@ def _in_use(p: Path) -> bool:
 def temp_candidates(cfg, temp: Path):
     """(path, reason) for every dir the sweep may consider: our prefixes, plus pytest's own leftovers."""
     prefixes = tuple(cfg["temp_prefixes"])
-    try:
-        entries = list(os.scandir(temp))
-    except OSError:
-        return
+    entries = []
+    # House Carl's check keeps its scratch beside the masters when they are not on the temp drive, and a failed check leaves
+    # its report there. Same names, same gates; an absent folder is simply none.
+    for parent in (temp, Path(cfg["root"]) / ".housecarl-tmp"):
+        try:
+            entries += list(os.scandir(parent))
+        except OSError:
+            continue
     for e in entries:
         try:
             if e.is_symlink() or not e.is_dir(follow_symlinks=False):
@@ -2081,7 +2150,23 @@ def _daily_module():
 # --------------------------------------------------------------------------- report
 
 def dir_size(p: Path) -> int:
-    return sum(f.stat().st_size for f in walk_files(p) if f.exists()) if p.exists() else 0
+    """Report only, so unlike walk_files it steps over a link or a file another program just removed."""
+    def linked(path):
+        try:
+            st = os.lstat(path)
+        except OSError:
+            return True
+        return stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x400    # os.walk follows a junction
+    total = 0
+    for folder, dirs, files in os.walk(str(p)):
+        dirs[:] = [d for d in dirs if not linked(os.path.join(folder, d))]
+        for name in files:
+            try:
+                st = os.lstat(os.path.join(folder, name))
+            except OSError:
+                continue
+            total += st.st_size if stat.S_ISREG(st.st_mode) else 0
+    return total
 
 
 def user_level(cfg):
@@ -2109,7 +2194,7 @@ def user_level(cfg):
 def report(cfg) -> int:
     doc = plan(cfg)
     print_coverage(doc)
-    print_rows(doc["rows"], "agent output + rolling stores")
+    print_rows(doc["rows"], "agent output + rolling stores", doc["actions"])
     by = {}
     for a in doc["actions"]:
         by[a["class"]] = by.get(a["class"], 0) + a["bytes"]
@@ -2145,7 +2230,10 @@ def main(argv) -> int:
         print("housekeep: staging cleanup REFUSED: " + "; ".join(refusals), file=sys.stderr)
     try:
         return _run(cmd, args, cfg)
-    except (ProtectionUnavailable, OSError) as e:    # fail closed: a protection that cannot be evaluated refuses
+    except Exception as e:                           # fail closed: a protection that cannot be evaluated refuses
+        if not isinstance(e, (ProtectionUnavailable, OSError, ValueError, KeyError)) \
+                and type(e).__name__ != "ArchiveError":
+            raise
         print("housekeep: REFUSED, nothing planned or applied: {}".format(e), file=sys.stderr)
         return 1
 
@@ -2203,7 +2291,7 @@ def _run(cmd, args, cfg) -> int:
         doc = plan(cfg, only=only)
         Path(args[1]).write_text(json.dumps(doc, indent=1), encoding="utf-8")
         print_coverage(doc)
-        print_rows(doc["rows"], "plan")
+        print_rows(doc["rows"], "plan", doc["actions"])
         print("{} action(s) written to {}".format(len(doc["actions"]), args[1]))
         return 0
     if cmd == "apply" and args:

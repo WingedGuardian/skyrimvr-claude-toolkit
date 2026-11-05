@@ -5,6 +5,8 @@
     python tools/skyguard doctor [--root R] [--json]  the hook health report (tools/skyguard/health.py)
     python tools/skyguard snapshot <list|restore <id> [--path F] [--to DIR | --in-place]> [--project P]
                                                      script and recovery snapshots (tools/skyguard/snapcli.py)
+    python tools/skyguard save-lock <status|on|off|unlock <save|folder>> [--project P]
+                                                     optional OS save locks (tools/skyguard/savelockcli.py)
 
 Exit codes follow the X4 contract: 0 verified, 1 partial or disagreeing, 2 refused or unreadable, 3 unsupported.
 """
@@ -12,7 +14,7 @@ from __future__ import annotations
 
 import sys
 
-USAGE = "usage: skyguard <lock|guards|doctor|snapshot> ... (see tools/skyguard/cli.py)"
+USAGE = "usage: skyguard <lock|guards|doctor|snapshot|save-lock> ... (see tools/skyguard/cli.py)"
 GUARDS_USAGE = "usage: guards <off|on|status> [--project P] [--session S] [--reason TEXT (off only)]"
 REASON_MAX = 120          # characters; skydoctor shows 60 of them and the session-start banner 80, both sanitised
 
@@ -165,10 +167,13 @@ def main(argv=None, out=None) -> int:
     if cmd == "snapshot":
         from . import snapcli
         return snapcli.main(rest, out)
+    if cmd == "save-lock":
+        from . import savelockcli
+        return savelockcli.main(rest, out)
     if cmd == "doctor":
         from . import health
         from . import lock as _lock
-        if "--root" not in rest:
+        if not any(a == "--root" or a.startswith("--root=") for a in rest):
             rest = rest + ["--root", _lock.default_root()]
         try:
             return health.main(["report"] + rest)

@@ -97,6 +97,8 @@ def _claude_definition_timeouts() -> dict:
     for groups in d["hooks"].values():
         for g in groups:
             for h in g["hooks"]:
+                if h["command"].endswith('/tools/session-charter.sh"'):
+                    continue    # advisory context, not a guard wrapper: no deadline chain (tests/test_session_charter.py)
                 m = re.search(r"\.claude/hooks/([\w-]+\.sh)", h["command"])
                 out[m.group(1)] = h["timeout"]
     return out
@@ -170,6 +172,8 @@ def test_with_time_left_the_wrapper_answers_only_once_the_killed_child_is_gone(t
 
 
 def test_a_hung_probe_is_killed_by_its_pid(tmp_path):
+    # The budget also covers the WORKING fallback, so 1 s went GUARD INERT under load (gate, 2026-11-03). Nothing here
+    # asserts the budget's length, so a longer one loses no coverage.
     root = _install(tmp_path, MISSING)
     pidfile = tmp_path / "probe.pid"
     src = tmp_path / "hang.py"
@@ -177,7 +181,7 @@ def test_a_hung_probe_is_killed_by_its_pid(tmp_path):
     _shim(tmp_path / "shims", "python", f'exec "{REAL_PY}" "{src.as_posix()}"\n')
     _working(tmp_path / "shims", "python3")
     try:
-        r = _fire(root, [tmp_path / "shims"], _esp_write(root), {"SKYGUARD_PROBE_TIMEOUT": "1"}, timeout=45)
+        r = _fire(root, [tmp_path / "shims"], _esp_write(root), {"SKYGUARD_PROBE_TIMEOUT": "5"}, timeout=45)
         assert _reason(r).startswith(BLOCKED), r.stdout
         pid = int(pidfile.read_text())
         end = time.time() + 15

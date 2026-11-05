@@ -91,7 +91,7 @@ def pristine(tmp_path_factory):
         (root / "scripts" / "prepush-gate.py").unlink()
     for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", ".claude/backups",
                  ".claude/retired",
-                 "KNOWLEDGEBASE.local.md", ".superpowers", ".skyguard", "tools/resaver-cli/tests"):
+                 "KNOWLEDGEBASE.local.md", ".superpowers", ".skyguard", ".modding-agent-harness", "tools/resaver-cli/tests"):
         p = root / junk
         if p.is_dir():
             shutil.rmtree(p)
@@ -233,7 +233,7 @@ BREAKS = {
     "resaver-port-checker-shipped": (lambda r: (r / "tools" / "resaver-port-write-check.py").write_text("x"),
                                      "no ReSaver Plus qualification checker"),
     "resaver-plus-patch-missing": (lambda r: sorted((r / "tools" / "resaver-plus" / "patches").glob("*.patch"))[0]
-                                   .unlink(), "carries the tested 27 patches"),
+                                   .unlink(), "carries the tested 10 patches"),
     "resaver-plus-license-missing": (lambda r: (r / "tools" / "resaver-plus" / "LICENSE").unlink(),
                                      "tools/resaver-plus/LICENSE present"),
     "resaver-plus-notice-missing": (lambda r: (r / "tools" / "resaver-plus" / "NOTICE.md").unlink(),
@@ -259,11 +259,11 @@ def test_every_check_can_fail_on_its_own_line(payload, brk):
 
 
 def test_the_hook_floor_is_the_tree_recounted():
-    """6 Claude wrappers plus the Codex entries, counted from the tree, not retyped from an old workflow."""
+    """7 Claude wrappers plus the Codex entries, counted from the tree, not retyped from an old workflow."""
     m = _mod()
     claude = sorted((REPO / ".claude" / "hooks").rglob("*.sh"))
     codex = sorted(p for p in (REPO / ".codex" / "hooks").rglob("*") if p.is_file())
-    assert m.CLAUDE_HOOK_FLOOR == len(claude) == 6, claude
+    assert m.CLAUDE_HOOK_FLOOR == len(claude) == 7, claude
     assert m.CODEX_ENTRY_FLOOR == len(codex), codex
     assert m.HOOK_FLOOR == len(claude) + len(codex)
     sys.path.insert(0, str(REPO / "tools"))
@@ -420,14 +420,18 @@ def test_an_allow_prefix_below_the_home_is_still_applied(tmp_path):
     assert r.returncode == 0 and "NOT applied" not in r.stdout, r.stdout + r.stderr
 
 
-def test_the_checker_itself_names_no_one():
+def test_the_checker_itself_names_no_one(tmp_path):
     """The name is read at check time. A literal one in the repo would be the very leak this hunts."""
+    # Works on a runner too, whose own account name is generic: a name the checker cannot hold as a literal is still found.
+    name = "zq" + "checktimename"
+    (tmp_path / "a.md").write_text("by " + name, encoding="utf-8")
+    assert _leaks([tmp_path], _clean_env(USERNAME=name, USERPROFILE="C:/Users/" + name)).returncode == 1
     text = CHECKER.read_text(encoding="utf-8").lower()
+    assert name not in text
     for k in ("USERNAME", "USER", "LOGNAME"):
         n = os.environ.get(k, "")
         if len(n) >= 4 and n.lower() not in _mod().GENERIC_ACCOUNTS:
             assert n.lower() not in text, k
-    assert json.dumps  # keep the import honest for linters
 
 
 def test_changed_from_skips_only_byte_identical_files(tmp_path):
@@ -631,6 +635,21 @@ def test_a_registered_hook_missing_from_the_payload_is_named(payload):
     r = _check(payload, "--section", "hooks")
     line = _line(r.stdout, ".claude/settings.json registers the hooks")
     assert r.returncode == 1 and "!!" in line and "protect-mcp.sh" in line, r.stdout
+
+
+def test_an_advisory_hook_does_not_stand_in_for_a_dropped_guard_registration(payload):
+    """tools/session-charter.sh is registered too, but it is not a guard: with one guard's registration dropped, the
+    floor must still fail although the registered total is back at seven."""
+    s = payload / ".claude" / "settings.json"
+    cfg = json.loads(s.read_text(encoding="utf-8"))
+    for groups in cfg["hooks"].values():
+        for g in groups:
+            g["hooks"] = [h for h in g["hooks"] if "protect-mcp.sh" not in h["command"]]
+    assert any("session-charter.sh" in h["command"] for g in cfg["hooks"]["UserPromptSubmit"] for h in g["hooks"])
+    s.write_text(json.dumps(cfg), encoding="utf-8")
+    r = _check(payload, "--section", "hooks")
+    line = _line(r.stdout, ".claude/settings.json registers the hooks")
+    assert r.returncode == 1 and "only 6 guard hook(s) registered" in line, r.stdout
 
 
 # ------------------------------------------------------------------ fix round 2 (re-review N1, N3)

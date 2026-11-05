@@ -17,7 +17,9 @@ FORWARDED_ENV = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "T
                  "TOOLKIT_REQUIRE_NODE_DEPS",
                  # The CI shard selector tests/conftest.py reads. Not forwarding it ran the WHOLE mutation gate in
                  # every shard job (CI run 41254615914: 2 Linux shards x 3,180 twins, 2 h each, no "deselected").
-                 "SKYGUARD_MUTATION_SHARD")
+                 "SKYGUARD_MUTATION_SHARD", "SKYGUARD_MUTATION_FILES", "SKYGUARD_MUTATION_LIMIT",
+                 # test_opencode_portable fails instead of skipping on CI when Node is missing. It never saw this.
+                 "CI")
 
 
 def evidence_root(repo):

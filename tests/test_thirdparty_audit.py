@@ -1205,11 +1205,11 @@ def test_xeditlib_audit_does_not_attribute_another_tools_commit_to_xeditlib(tmp_
 
 # ------------------------------------------------------------------ v4.0.0: tools pinned by commit, with no upstream tags
 
-PIN = "0d48f60cb8a69b367abfbd78d58418e64c507da5"
+PIN = "098eb8c1c3a23552c7662a2083f4aca9a2ff41f4"
 RESAVERPP = {
     "tools/resaver-plus/build.py": 'UPSTREAM_COMMIT = "%s"\n' % PIN,
     "tools/resaver_native.py": 'UPSTREAM_COMMIT = "%s"\n' % PIN,
-    "tools/resaver-plus/README.md": "| Upstream | [Tonycubed2/ResaverPP](x), version **19.6**, commit `%s` |\n" % PIN,
+    "tools/resaver-plus/README.md": "| Upstream | [Tonycubed2/ResaverPP](x), version **51**, commit `%s` |\n" % PIN,
 }
 HEAD_URL = "https://api.github.com/repos/Tonycubed2/ResaverPP/commits/HEAD"
 

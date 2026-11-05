@@ -262,6 +262,8 @@ def run_conformance(adapter_dir, profile: dict, cases: dict, command: Optional[l
     if prob:
         return [Row("profile", False, prob)]
     listed = [c for c in cases.get("cases", []) if isinstance(c, dict)]
+    if any(not isinstance(c.get("id"), str) for c in listed):
+        return [Row("cases", False, "every case needs a string id")]
     by_id = {c.get("id"): c for c in listed}
     if command is not None and not port:
         # The identity check hashes <adapter-dir>/adapter.py. A --command may run some OTHER file, so it would

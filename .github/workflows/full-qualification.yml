@@ -285,8 +285,8 @@ jobs:
 
   # v4.0.0: ReSaver Plus (the opt-in native ReSaver backend) is BUILT on the user's machine and never shipped, so CI
   # builds it exactly that way on a machine that never saw the dev install -- the "second machine" build: the pin
-  # verified, the 27 patches applied, every changed/added file checked against SOURCE-SHA256, the CLI and tests built
-  # with the GUI off, all six runnable CTest targets passing (build.py refuses to install otherwise) -- then runs every
+  # verified, the 10 patches applied, every changed/added file checked against SOURCE-SHA256, the CLI and tests built
+  # with the GUI off, all seven runnable CTest targets passing (build.py refuses to install otherwise) -- then runs every
   # operation through tools/resaver-cli.sh on a SYNTHETIC save made by the build's own probe (never a real save).
   # The behavior legs test the same code with a stub executable on both OSes.
 
@@ -310,8 +310,8 @@ jobs:
           "$vswhere" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
             -property catalog_productDisplayVersion || echo "::warning::vswhere did not answer"
           cmake --version || echo "cmake is not on PATH; build.py uses the copy inside Visual Studio"
-      - name: Build (pin, patches, SOURCE-SHA256, CLI + tests with the GUI off, six CTest targets)
-        run: python -B tools/resaver-plus/build.py --work "$(cygpath -m "$RUNNER_TEMP")/rspp" --jobs 2
+      - name: Build (pin, patches, SOURCE-SHA256, CLI + tests with the GUI off, seven CTest targets)
+        run: python -B tools/resaver-plus/build.py --work "$(cygpath -m "$RUNNER_TEMP")/rspp" --jobs 2 --keep-build
       - name: The installed build matches its BUILD-INFO
         run: |
           cat tools/resaver-plus/build/BUILD-INFO.json

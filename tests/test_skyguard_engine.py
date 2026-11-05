@@ -118,7 +118,7 @@ def test_a_failed_status_is_never_lowered_to_partial():
 # ---- v4.0.0 review L3 LOW-1: a malformed inline snippet is a parse refusal, not a crashed engine (GUARD INERT) ----
 
 def test_a_malformed_inline_snippet_is_a_parse_refusal_not_a_crash():
-    v = _shell_status('python -c "print(1"')
+    v = _shell_status('python -c "print(1; open(p, m)"')
     assert (v.decision, v.status, v.code) == ("deny", "failed", "engine.UNPARSED")
     assert v.reason == "preservation/policy failed: Python literal write scope could not be parsed"
 
@@ -131,5 +131,5 @@ def test_the_claude_hook_answers_a_malformed_inline_snippet(tmp_path):
     spec.loader.exec_module(rec)
     install = rec.make_install(tmp_path, REPO / ".claude" / "hooks", "saves-bulk")
     got = rec.fire_inprocess(install, "protect-bash.sh", {"tool_name": "Bash", "session_id": "s",
-                                                          "tool_input": {"command": 'python -c "print(1"'}})
+                                                          "tool_input": {"command": 'python -c "print(1; open(p, m)"'}})
     assert got["decision"] == "deny" and "could not be parsed" in got["text"], got

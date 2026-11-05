@@ -45,16 +45,28 @@ CODE_FILES = ("housekeep.py", "housekeep_archive.py", "housekeep_daily.py", "hou
 def running_games(names):
     if sys.platform != "win32":
         return []
-    out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True,
-                         **housekeep.NO_WINDOW).stdout.lower()
+    # A tasklist that fails or hangs cannot say the game is closed: treat them all as running, and the cleanup waits.
+    try:
+        got = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True, errors="replace", timeout=60,
+                             **housekeep.NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return list(names)
+    if got.returncode != 0 or not got.stdout.strip():
+        return list(names)
+    out = got.stdout.lower()
     return [g for g in names if '"{}"'.format(g.lower()) in out]
 
 
 def low_priority():
     if sys.platform == "win32":                       # idle CPU class + background I/O mode for this process
-        k = ctypes.windll.kernel32
-        k.SetPriorityClass(k.GetCurrentProcess(), 0x00000040)
-        k.SetPriorityClass(k.GetCurrentProcess(), 0x00100000)
+        # The pseudo-handle is -1 as a pointer: with ctypes' default int it arrives invalid and the call does nothing
+        # (MEASURED 2026-11-02: error 6, the class unchanged, while the announcement promised low priority).
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.GetCurrentProcess.restype = ctypes.c_void_p
+        k.SetPriorityClass.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+        me = k.GetCurrentProcess()
+        k.SetPriorityClass(me, 0x00100000)            # background I/O first: MEASURED, it resets the class to normal
+        k.SetPriorityClass(me, 0x00000040)            # idle CPU class
 
 
 def log(cfg, text):
@@ -103,7 +115,8 @@ def announcement(cfg, now=None) -> str:
         return ("HOUSEKEEP: housekeep's code changed since you approved it, so today's run only PLANS (nothing is "
                 "removed or archived). When it finishes, review {} and approve it.".format(f(cfg, "REVIEW")))
     return ("HOUSEKEEP: today's cleanup (toolkit housekeep, approved version {}) starts now in the background -- low "
-            "priority, no windows, at most {} min. It archives finished work to {} and recycles build leftovers; "
+            "priority, no windows, at most {} min. It archives finished work to {} and applies a plan made just now by the "
+            "code version you approved (you approved the code, not this list); "
             "nothing in use, no saves. Summary at the next session start; log: {}.".format(
                 cfg["approved_sha256"][:8], cfg["daily_minutes"], cfg["archive_root"], f(cfg, "LOG")))
 
@@ -171,7 +184,7 @@ def run(cfg, dry=False, now=None) -> str:
     with redirect_stdout(buf):
         doc = housekeep.plan(cfg)
         housekeep.print_coverage(doc)
-        housekeep.print_rows(doc["rows"], "plan")
+        housekeep.print_rows(doc["rows"], "plan", doc["actions"])
         f(cfg, "PLAN").write_text(json.dumps(doc, indent=1), encoding="utf-8")
         if not ok:
             write_review(cfg, doc, sha)
@@ -179,7 +192,8 @@ def run(cfg, dry=False, now=None) -> str:
             # Keep the previous review receipt: approval does not prove its notes obsolete.
             if not dry and doc["actions"]:
                 done = housekeep.apply(doc, cfg, deadline=now + cfg["daily_minutes"] * 60, summary=True)
-    write_alerts(doc, cfg)
+    if not dry:                     # the docstring's "plan and report only": a dry run must not move the growth baseline
+        write_alerts(doc, cfg)
     if not ok:
         summary = "today's run only PLANNED ({} actions, {:.1f} GiB) because the code changed; review {}".format(
             len(doc["actions"]), sum(a["bytes"] for a in doc["actions"]) / GIB, f(cfg, "REVIEW"))
@@ -193,5 +207,16 @@ def run(cfg, dry=False, now=None) -> str:
     return "housekeep: " + summary + " -- " + str(f(cfg, "LOG"))
 
 
+def main(argv) -> int:
+    cfg = housekeep.load_config(None)
+    dry = "--dry-run" in argv
+    games = running_games(cfg["pause_while_running"])
+    if games and not dry:                # by hand as well: only the session path goes through due()
+        print("housekeep: not run: {} running (--dry-run only plans)".format(", ".join(games)))
+        return 1
+    print(run(cfg, dry=dry))
+    return 0
+
+
 if __name__ == "__main__":
-    print(run(housekeep.load_config(None), dry="--dry-run" in sys.argv[1:]))
+    sys.exit(main(sys.argv[1:]))

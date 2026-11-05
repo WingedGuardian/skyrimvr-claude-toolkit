@@ -48,7 +48,7 @@ physical allocation. Report permanent deletions, recycling and failures separate
 | **Evidence** | Findings, READMEs, receipts (`.md`, `.json`, `.jsonl`), small logs; every file a project doc links to | Kept. They are small, and docs point at them. |
 | **Recreatable** | A byte-identical copy of a file that is still live (a fixture copy of a game master) | Removed as soon as it is idle: the live file is the copy. |
 | **Build output** | Compiler intermediates inside build folders | Review candidates only. Removal requires an explicit content-bound obsolete decision. Build products and active work remain protected. |
-| **Finished work** | A task folder that is done: no write for 7 days, no read for 48 hours, not named in the instruction file's Live state block, not pinned with `.housekeep-keep`, no save or git repository/worktree, no ownership receipt without qualified release proof. A session can mark it done early with `.housekeep-closed`; independent holds still apply. | Zipped to the archive folder, the zip read back and checked, a short `ARCHIVED.md` (with a restore command) left behind, then the bulk recycled. The archive is local by default; another drive or a NAS is optional, never assumed. Archive age triggers review only; unique archives stay until explicitly declared obsolete. |
+| **Finished work** | A task folder that is done: no write for 14 days (`archive_after_days`; 7, `min_idle_days`, once agent output is over `budget_gib`), no read for 48 hours, not named in the instruction file's Live state block, not pinned with `.housekeep-keep`, no save or git repository/worktree, no ownership receipt without qualified release proof. A session can mark it done early with `.housekeep-closed`; independent holds still apply. | Zipped to the archive folder, the zip read back and checked, a short `ARCHIVED.md` (with a restore command) left behind, then the bulk recycled. The archive is local by default; another drive or a NAS is optional, never assumed. Archive age triggers review only; unique archives stay until explicitly declared obsolete. |
 | **Duplicate** | The same bytes at several agent-output paths | Stored once: hard links to one read-only copy. Every path keeps working. |
 | **Rolling** | Per-launch logs, snapshot folders, named scratch beds | Compression requires a verified lossless replacement. Snapshots require an identical retained generation. Unique logs and scratch need explicit content-bound obsolete decisions; age alone never deletes them. |
 | **Rolling tool store** | Configured rolling snapshots, including stores under backup folders | Retire only a byte-identical repeated generation after re-proving the retained copy. Newest and distinct generations stay. |
@@ -299,7 +299,8 @@ in the summary for you to decide.
 ### The archive
 
 Finished folders are zipped to `archive_root` (default `.claude/archive`, on the same drive: evidence and logs
-compress several times over) and `archive_retention_days` (90; 0 disables review) sets the review threshold. Age never proves an archive obsolete. Point
+compress several times over). Anything protected in a finished folder (a Forever name, linked evidence, a nested
+`.housekeep-keep`) stays where it is; the zip holds a verified copy and the rest of the folder is retired. Age never proves an archive obsolete. Point
 `archive_root` at another drive or a NAS share if you have one, and add `archive_roots` entries (`{"folder":
 days}`) for folders of your own whose subfolders should be archived after that many idle days. Restore a folder
 with `python tools/housekeep_archive.py restore "<folder>/ARCHIVED.md"`; it refuses to overwrite anything.

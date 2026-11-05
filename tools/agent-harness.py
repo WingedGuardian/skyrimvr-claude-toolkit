@@ -58,6 +58,8 @@ def main(argv=None):
             result = save_store.restore_result(root, args.transaction, args.path, args.to, args.in_place,
                                                host=args.host, session_id=args.session_id, transcript=args.transcript,
                                                command=json.dumps(sys.argv[1:] if argv is None else argv))
+            if (result.get("result") or {}).get("decision") == "deny":
+                exit_status = 1              # a restore that did not happen is not a success, unlike a `check` decision
         elif args.command == "capabilities":
             result = {"api_version": 1, "profile": "skyrim", "unknown_policy": "warn and allow",
                       "host_enforcement": "unmeasured; qualify the actual host transport and review hooks",
@@ -75,8 +77,12 @@ def main(argv=None):
         if args.command in installation.COMMANDS:
             result, exit_status = installation.failure(args.command, exc, "Skyrim adapter failed")
         else:
+            # A restore that failed partway must say which files it published and where the journal is, and fail.
+            detail = ": " + str(exc) if args.command == "save-restore" else ""
             result = {"api_version": 1, "result": contracts.Result("deny", "failed", reason=
-                      "Skyrim adapter failed: " + type(exc).__name__).as_dict(), "transactions": []}
+                      "Skyrim adapter failed: " + type(exc).__name__ + detail).as_dict(), "transactions": []}
+            if args.command == "save-restore":
+                exit_status = 1
     sys.stdout.buffer.write((json.dumps(result, ensure_ascii=True) + "\n").encode("ascii"))
     return exit_status
 

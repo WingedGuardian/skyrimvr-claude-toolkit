@@ -345,7 +345,7 @@ public class ResaverCLI {
                 }
                 break;
             default:
-                b.append("]}"); System.out.println(b); err("unknown subsystem: " + sub); return;
+                err("unknown subsystem: " + sub); return;
         }
         b.append("],\"count\":").append(n);
         if (n >= limit) b.append(",\"truncated\":true");
@@ -574,7 +574,10 @@ public class ResaverCLI {
 
         GlobalVariable match = null;
         for (GlobalVariable g : ess.getGlobals().getVariables()) {
-            if (globalMatches(g, target)) { match = g; break; }
+            if (globalMatches(g, target)) {
+                if (match != null) { err("ambiguous: " + target + " matches more than one global; use Plugin.esp:formid"); return; }
+                match = g;
+            }
         }
         StringBuilder b = new StringBuilder();
         b.append("{\"ok\":true,\"op\":\"set-global\",\"target\":").append(jstr(target)).append(",\"apply\":").append(apply);
@@ -656,9 +659,12 @@ public class ResaverCLI {
                   : old instanceof Variable.Bool ? "bool" : old instanceof Variable.Str ? "str" : null);
         if (t == null) return null;
         switch (t) {
-            case "int":   return new Variable.Int(Integer.decode(val));
+            // Base 10 unless spelled 0x: Integer.decode read a zero-padded 010 as octal 8, silently.
+            case "int":   return new Variable.Int(val.matches("[+-]?0[xX].*") ? Integer.decode(val) : Integer.parseInt(val));
             case "float": return new Variable.Flt(Float.parseFloat(val));
-            case "bool":  return new Variable.Bool(val.equals("1") || Boolean.parseBoolean(val));
+            case "bool":
+                if (!val.matches("(?i)0|1|true|false")) throw new NumberFormatException("not a bool: " + val);
+                return new Variable.Bool(val.equals("1") || Boolean.parseBoolean(val));
             case "str":   return new Variable.Str(val, ctx);
             default:      return null;
         }
@@ -1229,7 +1235,7 @@ public class ResaverCLI {
     static String deepest(Throwable ex){ Throwable t=ex; while(t.getCause()!=null) t=t.getCause(); String m=t.getClass().getSimpleName()+": "+t.getMessage(); return m.length()>120?m.substring(0,120):m; }
 
     // ---------- freeze-report (READ; offline VM-freeze-risk diagnostic) ----------
-    // Heuristic known freeze-causing scripts seen on this install (see project_vm_freeze_followup).
+    // Heuristic: scripts seen causing VM freezes on one modded install. Other load orders differ.
     static final String[] KNOWN_FREEZE = {"diversedragon","vddmainsct","_reaper","soulreaper"};
 
     static void freezeReport(ESS ess, Papyrus pap) {
@@ -1285,7 +1291,7 @@ public class ResaverCLI {
         b.append(",\"knownFreezeScripts\":{"); int n=0; for (Map.Entry<String,Integer> e : flagged.entrySet()){ if(n++>0)b.append(","); b.append(jstr(e.getKey())).append(":").append(e.getValue()); } b.append("}");
         b.append(",\"topActiveByScript\":["); appendTop(b, activeByScript, 12); b.append("]");
         b.append(",\"topSuspendedByScript\":["); appendTop(b, suspByScript, 12); b.append("]");
-        b.append(",\"note\":\"heuristic; known-freeze list seeded from project_vm_freeze_followup; in-game load is the real test\"}");
+        b.append(",\"note\":\"heuristic; known-freeze list comes from one modded install; in-game load is the real test\"}");
         System.out.println(b);
     }
     static String activeScriptName(ActiveScript a) {

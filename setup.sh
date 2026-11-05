@@ -4,13 +4,16 @@
 # This script is designed to be run FROM your Skyrim folder, after
 # extracting the toolkit zip into it. It configures everything in-place.
 #
-# Usage: bash setup.sh [--agent claude|codex|all|auto|generic|opencode] [--lock]
+# Usage: bash setup.sh [--agent claude|codex|all|auto|generic|opencode] [--lock] [--save-lock|--no-save-lock]
 #   --agent auto    (the default) every agent found on PATH; when none is found, all of them
 #   --agent claude  Claude Code only      --agent codex  Codex only (Windows only)
 #   --agent all     every named adapter (`both` is accepted as another name for it)
 #   --agent generic portable instructions only; --agent opencode OpenCode V1 plugin files
 #   --lock          also apply the Layer 2 read-only lock to the vanilla masters and archives.
 #                   OFF unless you pass it (bash tools/skyguard.sh lock unlock <file> lifts it again).
+#   --save-lock     lock the saves so no agent or script can delete or change them (Windows only; unlocking
+#                   one needs an administrator prompt). Asked interactively when neither flag is given;
+#                   --no-save-lock skips the question. OFF unless chosen.
 # Setup never installs software. Every install command it prints is for you to run.
 
 set -e
@@ -18,7 +21,7 @@ set -e
 # --- Options: checked before anything is written ----------------------------------------------------------
 # An unknown option or --agent value is a usage error (exit 2) and nothing is touched.
 usage() {
-    echo "usage: bash setup.sh [--agent claude|codex|all|auto|generic|opencode] [--lock]"
+    echo "usage: bash setup.sh [--agent claude|codex|all|auto|generic|opencode] [--lock] [--save-lock|--no-save-lock]"
     echo "  --agent auto    the default: every agent found on PATH (claude, codex); all of them when none is found"
     echo "  --agent claude  configure Claude Code only"
     echo "  --agent codex   configure Codex only (Windows only)"
@@ -26,9 +29,12 @@ usage() {
     echo "  --agent opencode configure the OpenCode V1 CLI target (running-host blocking unqualified)"
     echo "  --agent all     configure both (\`both\` means the same)"
     echo "  --lock          also lock the vanilla masters and archives read-only (off unless you ask)"
+    echo "  --save-lock     lock the saves against any delete or change (Windows; asked when neither flag is given)"
+    echo "  --no-save-lock  leave save locking off without asking"
 }
 AGENT_ARG="auto"
 WANT_LOCK=""
+WANT_SAVE_LOCK=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --agent)
@@ -38,6 +44,8 @@ while [ $# -gt 0 ]; do
             AGENT_ARG="$2"; shift 2 ;;
         --agent=*) AGENT_ARG="${1#--agent=}"; shift ;;
         --lock) WANT_LOCK=1; shift ;;
+        --save-lock) WANT_SAVE_LOCK=yes; shift ;;
+        --no-save-lock) WANT_SAVE_LOCK=no; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "setup.sh: unknown option '$1'. Nothing was changed." >&2; usage >&2; exit 2 ;;
     esac
@@ -443,7 +451,7 @@ case "$RSPP_UNAME" in
                 echo "  CMake was not found on PATH or inside Visual Studio: add the 'C++ CMake tools for Windows' component."
             elif [ "${RSPP_TOOLSET}" != "$RSPP_TESTED_TOOLSET" ] || [ "${RSPP_CMAKE%%-*}" != "$RSPP_TESTED_CMAKE" ]; then
                 echo "  NOTE: these differ from the tested versions. build.py still checks every source byte against the"
-                echo "  pinned hashes and installs nothing unless all six tests pass, but this toolchain itself is untested."
+                echo "  pinned hashes and installs nothing unless all seven tests pass, but this toolchain itself is untested."
             fi
             echo "  To use the native backend (optional; Java stays the default): python tools/resaver-plus/build.py,"
             echo "  then opt in with RESAVER_BACKEND=native (tools/resaver-plus/README.md)."
@@ -488,7 +496,12 @@ fi
 # "Dokumente – Müller" folder arrived as cp437 bytes, landed in skyrim-paths.env, and the guard's UTF-8 reader
 # refused every command (MEASURED, Plan 8 T7 review C1). This spelling emits UTF-8 with no BOM (MEASURED).
 DOCUMENTS_DIR=$(powershell -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Environment]::GetFolderPath('MyDocuments')" 2>/dev/null | tr -d '\r')
-[ -z "$DOCUMENTS_DIR" ] && DOCUMENTS_DIR="C:/Users/$USERNAME/Documents"
+if [ -z "$DOCUMENTS_DIR" ]; then
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*) DOCUMENTS_DIR="C:/Users/$USERNAME/Documents" ;;
+        *) DOCUMENTS_DIR="$HOME/Documents" ;;
+    esac
+fi
 # Normalize backslashes to forward slashes -- via tr, not bash's ${var//\\//}, which was
 # unreliable across the bash builds we tested (Cygwin bash silently no-ops on it).
 # $LOCALAPPDATA is backslash-delimited on every Windows install, and feeding a raw backslash
@@ -512,6 +525,7 @@ else
     SKYRIM_FOLDER="Skyrim VR"
 fi
 CONFIG_DIR="$DOCUMENTS_DIR/My Games/$SKYRIM_FOLDER"
+DOCUMENTS_GAME_DIR="$CONFIG_DIR"       # stays here when MO2 profile INIs move CONFIG_DIR: the saves do not move
 LOADORDER_DIR="$LOCALAPPDATA_DIR/$SKYRIM_FOLDER"
 
 # --- Detect Mod Organizer 2 -------------------------------------------------
@@ -603,6 +617,9 @@ pick_3x() {  # $1 = placeholder name, $2 = detected value -> prints the value to
     v=$( set -a; . "$MIG_ENV" >/dev/null 2>&1; n="SKYRIM_3X_$1"; printf '%s' "${!n:-}" )
     if [ -n "$v" ] && [ "$v" != "$2" ] && [ -d "$v" ] && [ "${SKYRIM_PREFER_DETECTED:-}" != 1 ]; then
         echo "  $1: your 3.x CLAUDE.md said $v (detected: ${2:-nothing}) -- keeping yours" >&2
+        if [ "$CARRIED_HAND_EDITED" != 1 ]; then
+            echo "    For this run only: nothing shows you changed it, so the next setup follows detection. To keep it, set it in skyrim-paths.env." >&2
+        fi
         printf '%s' "$v"
     else
         if [ -n "$v" ] && [ "$v" != "$2" ]; then
@@ -611,7 +628,10 @@ pick_3x() {  # $1 = placeholder name, $2 = detected value -> prints the value to
         printf '%s' "$2"
     fi
 }
+TRUE_CONFIG_DIR="$CONFIG_DIR"; TRUE_LOADORDER_DIR="$LOADORDER_DIR"; TRUE_MO2_MODS="$MO2_MODS"; TRUE_MO2_OVERWRITE="$MO2_OVERWRITE"
+CARRIED_HAND_EDITED=""
 if [ -f "$MIG_ENV" ]; then
+    CARRIED_HAND_EDITED=$( set -a; . "$MIG_ENV" >/dev/null 2>&1; printf '%s' "${SKYRIM_3X_HAND_EDITED:-}" )
     echo ""
     echo "Paths carried from your 3.x install ($MIG_ENV):"
     CONFIG_DIR=$(pick_3x CONFIG_DIR "$CONFIG_DIR")
@@ -649,10 +669,13 @@ fi
 echo ""
 echo "Configuring safety hooks..."
 HOOKS_MISSING=0
+HOOKS_MISSING_CLAUDE=0
+HOOKS_MISSING_CODEX=0
 # The Codex entries (.codex/hooks/) take the same interpreter. The .sh holds it as PY='...' like the Claude
 # hooks; the .ps1 as $PY = '...' with PowerShell's own quote escaping (PY_PS above).
 for hook in .claude/hooks/protect-bash.sh .claude/hooks/protect-files.sh .claude/hooks/protect-mcp.sh \
             .claude/hooks/backup-before-edit.sh .claude/hooks/snapshot-before-tool.sh .claude/hooks/session-kb-guard.sh \
+            .claude/hooks/save-sentinel.sh \
             .codex/hooks/skyguard-entry.ps1 .codex/hooks/skyguard-entry.sh; do
     case "$hook" in
         *.ps1) H_SED="$PY_PS_SED"; H_LINE="\$PY = '$PY_PS'"; H_RE='^[$]PY = '; H_NEW="\$PY = '$PY_PS_SED'" ;;
@@ -664,6 +687,10 @@ for hook in .claude/hooks/protect-bash.sh .claude/hooks/protect-files.sh .claude
     if [ ! -f "$GAME_DIR/$hook" ]; then
         echo "  MISSING: $hook -- this hook is NOT installed and will never run"
         HOOKS_MISSING=$((HOOKS_MISSING + 1))
+        case "$hook" in
+            .codex/*) HOOKS_MISSING_CODEX=$((HOOKS_MISSING_CODEX + 1)) ;;
+            *) HOOKS_MISSING_CLAUDE=$((HOOKS_MISSING_CLAUDE + 1)) ;;
+        esac
     elif grep -q '{{PYTHON_PATH}}' "$GAME_DIR/$hook"; then
         if [ -n "$PYTHON_PATH" ]; then
             sed -i "s|{{PYTHON_PATH}}|$H_SED|g" "$GAME_DIR/$hook"
@@ -828,6 +855,59 @@ retire_3x_paths() {
         echo "  (the guard reads nothing from it that skyrim-paths.env does not already say)."
     fi
 }
+# A path set by hand survives a re-run (review 2026-11-02: a hand-set SKYRIM_MO2_MODS reset to '' with nothing reported,
+# and that folder stopped being guarded). Hand-set means it differs from the `# detected` line setup wrote beside it, so
+# a path setup wrote itself still follows a profile switch or a moved Documents: keeping that one would leave the new
+# folder unguarded. No `# detected` line (a file from before this rule): nothing proves a hand edit, so detection wins.
+# Only a real folder is kept; SKYRIM_PREFER_DETECTED=1 takes the detected path.
+DETECTED_LINES=""
+keep_hand_set() {  # $1 = key in skyrim-paths.env, $2 = detected value -> prints the value to use; notes go to stderr
+    local v="" was="" seen=""
+    if [ -f "$PATHS_ENV" ]; then
+        # What the guard's reader takes: `export`, no quotes, CRLF. A hand edit in those spellings was dropped silently.
+        v=$(tr -d '\r' < "$PATHS_ENV" | sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?$1=//p")
+        if [ "$(printf '%s\n' "$v" | grep -c .)" -gt 1 ]; then
+            echo "  !! $1 is set more than once in skyrim-paths.env; only the last one is kept." >&2
+        fi
+        v=$(printf '%s\n' "$v" | tail -n 1)
+        case "$v" in
+            \'*\') v=${v:1:${#v}-2} ;;
+            \"*\") v=${v:1:${#v}-2} ;;
+        esac
+        v=${v//"'\\''"/"'"}
+        seen=$(grep -c "^# detected $1=" "$PATHS_ENV")
+        was=$(sed -n "s/^# detected $1=['\"]\(.*\)['\"]\$/\1/p" "$PATHS_ENV" | tail -n 1)
+        was=${was//"'\\''"/"'"}
+    fi
+    if test "$seen" = 1 && test "$v" != "$was" && test -n "$v" && test -d "$v" && test "${SKYRIM_PREFER_DETECTED:-0}" != 1; then
+        if test "$v" != "$2"; then
+            echo "" >&2
+            echo "  !! $1: keeping the path you set by hand: $v" >&2
+            echo "  !! Setup detected ${2:-nothing} instead. The guard protects YOUR path, not the detected one." >&2
+            echo "  !! To use the detected one: SKYRIM_PREFER_DETECTED=1 bash setup.sh" >&2
+        fi
+        printf '%s' "$v"
+    else
+        if test "$seen" = 1 && test "$v" != "$was" && test -n "$v" && test ! -d "$v" && test "${SKYRIM_PREFER_DETECTED:-0}" != 1; then
+            echo "  !! $1: the path you set by hand is not a folder here ($v), so it is not used; using ${2:-nothing}." >&2
+        fi
+        printf '%s' "$2"
+    fi
+}
+_keep() {  # $1 = key, $2 = name of the variable holding the detected value
+    local detected="${!2}" recorded true_name="TRUE_$2"
+    # A 3.x path the user corrected by hand is a hand-set path from now on: the record holds what setup really found, so
+    # the next run keeps it. One setup only ever wrote itself follows detection on the next run.
+    recorded="$detected"
+    if [ "$CARRIED_HAND_EDITED" = 1 ] && [ -n "${!true_name+x}" ]; then recorded="${!true_name}"; fi
+    DETECTED_LINES="$DETECTED_LINES# detected $1=$(sq "$recorded")"$'\n'
+    printf -v "$2" '%s' "$(keep_hand_set "$1" "$detected")"
+}
+_keep SKYRIM_CONFIG_DIR CONFIG_DIR
+_keep SKYRIM_DOCUMENTS_DIR DOCUMENTS_GAME_DIR
+_keep SKYRIM_LOADORDER_DIR LOADORDER_DIR
+_keep SKYRIM_MO2_MODS MO2_MODS
+_keep SKYRIM_MO2_OVERWRITE MO2_OVERWRITE
 # Written beside it, then renamed: a crash never leaves half a file, or an empty one, in place.
 {
     printf '# Written by setup.sh. Machine-local: not tracked, not shipped.\n'
@@ -835,11 +915,14 @@ retire_3x_paths() {
     printf '# contains the word "Skyrim" -- a scratchpad, a checkout, a downloaded zip.\n'
     printf 'SKYRIM_GAME_ROOT=%s\n' "$(sq "$GAME_ROOT_WIN")"
     printf 'SKYRIM_CONFIG_DIR=%s\n' "$(sq "$CONFIG_DIR")"
+    printf 'SKYRIM_DOCUMENTS_DIR=%s\n' "$(sq "$DOCUMENTS_GAME_DIR")"
     printf 'SKYRIM_LOADORDER_DIR=%s\n' "$(sq "$LOADORDER_DIR")"
     # MO2 keeps every mod's real files in mods/ and overwrite/, outside the install, so the guard can only
     # protect them if it is told where they are. Empty ('') on a non-MO2 install: declares nothing.
     printf 'SKYRIM_MO2_MODS=%s\n' "$(sq "$MO2_MODS")"
     printf 'SKYRIM_MO2_OVERWRITE=%s\n' "$(sq "$MO2_OVERWRITE")"
+    # What setup found, so a re-run can tell a path edited by hand from one it wrote itself.
+    printf '%s' "$DETECTED_LINES"
     # The interpreter the hooks were configured with ('' when no Python was found).
     printf 'SKYGUARD_PYTHON=%s\n' "$(sq "$PYTHON_PATH")"
 } > "$PATHS_ENV.new" 2>/dev/null && mv -f "$PATHS_ENV.new" "$PATHS_ENV" && PATHS_OK=1 || PATHS_OK=""
@@ -870,6 +953,11 @@ else
     if [ "$_want" = "$_got" ] && [ "$_grc" = 0 ] && [ "$_want" = "$_guard" ]; then
         echo "  Wrote: skyrim-paths.env"
         retire_3x_paths
+        # Carried once. It is in skyrim-paths.env now, as what this run found; left in place, an old profile that still
+        # exists would beat detection on every later run and leave the current one unguarded.
+        if [ -f "$MIG_ENV" ]; then
+            mv -f "$MIG_ENV" "$MIG_ENV.used" 2>/dev/null || true
+        fi
     else
         PATHS_BAD=1
         echo ""
@@ -1030,6 +1118,10 @@ MMEOF
     echo "  Configured with your paths (Skyrim folder: $SKYRIM_FOLDER)."
 else
     echo "  Already configured."
+    if [ -n "$CONFIG_DIR" ] && ! grep -qF "$CONFIG_DIR" "$GAME_DIR/$DOC"; then
+        echo "  !! $DOC still names older folders: the guard follows skyrim-paths.env ($CONFIG_DIR), but this file was"
+        echo "  !! filled in once. Tell your agent the current folder, or re-extract $DOC and re-run setup."
+    fi
 fi
 done
 
@@ -1079,7 +1171,8 @@ mkdir -p "$GAME_DIR/.claude/backups"
 if [ -n "$DO_CLAUDE" ] && [ ! -f "$GAME_DIR/.claude/settings.local.json" ] && [ -f "$GAME_DIR/.claude/settings.local.json.example" ]; then
     cp "$GAME_DIR/.claude/settings.local.json.example" "$GAME_DIR/.claude/settings.local.json"
     echo ""
-    echo "  Copied settings.local.json.example -> settings.local.json (customize allowed commands later)"
+    echo "  Copied settings.local.json.example -> settings.local.json: common commands (rm, bash, python, curl and"
+    echo "  others) run without a prompt, and the guards still judge each one. Edit that file to change the list."
 fi
 
 # --- Optional: Nexus API integration status (non-blocking) ---
@@ -1123,19 +1216,91 @@ else
     echo "Layer 2 lock: OFF (the default). bash setup.sh --lock makes the vanilla masters and archives read-only."
 fi
 
+# --- Optional save locks (user ruling 2026-10-31): the OS refuses to delete or change a locked save ---
+# Off unless chosen. Asked only when a person is at the terminal on Windows and neither flag was given; Enter = no.
+SAVE_LOCK_RC=""
+SAVE_LOCK_SWITCH="$GAME_DIR/.modding-agent-harness/save-lock.json"
+echo ""
+case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) SL_WINDOWS=1 ;; *) SL_WINDOWS="" ;; esac
+if [ -f "$SAVE_LOCK_SWITCH" ] && grep -q '"enabled": true' "$SAVE_LOCK_SWITCH" 2>/dev/null; then
+    echo "Save locks: ON (already). Only an elevated prompt switches them off: bash tools/skyguard.sh save-lock off"
+elif [ -z "$SL_WINDOWS" ]; then
+    if [ "$WANT_SAVE_LOCK" = yes ]; then
+        echo "  !! --save-lock: save locks need Windows (NTFS). Not applied."
+        SAVE_LOCK_RC=3
+    fi
+else
+    if [ -z "$WANT_SAVE_LOCK" ] && [ -t 0 ]; then
+        echo "Save locks (optional, recommended): Windows itself refuses to delete or change your saves, so no agent,"
+        echo "script or tool can damage one. New saves, autosaves and quicksaves still work; saving over an old save"
+        echo "from the game menu leaves the old one in place. Unlocking a save later needs an administrator prompt."
+        echo "The locks outlast the toolkit: before removing it, run bash tools/skyguard.sh save-lock off (as admin)."
+        read -r -p "Lock your saves? (y/N) " SL_ANSWER || SL_ANSWER=""
+        case "$SL_ANSWER" in y|Y|yes|YES|Yes) WANT_SAVE_LOCK=yes ;; *) WANT_SAVE_LOCK=no ;; esac
+    fi
+    if [ "$WANT_SAVE_LOCK" = yes ]; then
+        if [ -z "$PY_FOUND" ]; then
+            SAVE_LOCK_RC=2
+            echo "  !! SAVE LOCKS NOT APPLIED: they need Python 3.10+. Install it and re-run: bash setup.sh --save-lock"
+        else
+            echo "Locking the saves (a few minutes for thousands of saves)..."
+            MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B "$PY_ROOT/tools/skyguard" save-lock on \
+                --project "$PY_ROOT" && SAVE_LOCK_RC=0 || SAVE_LOCK_RC=$?
+            if [ "$SAVE_LOCK_RC" != 0 ]; then
+                echo "  !! SAVE LOCKS NOT (fully) APPLIED (exit $SAVE_LOCK_RC, above). Check: bash tools/skyguard.sh save-lock status"
+            fi
+        fi
+    else
+        echo "Save locks: OFF. bash tools/skyguard.sh save-lock on (or bash setup.sh --save-lock) switches them on."
+    fi
+fi
+
 # --- Which agent ends up configured, said plainly ---
 CLAUDE_STATE="not configured"
 if [ -f "$GAME_DIR/CLAUDE.md" ] && ! grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/CLAUDE.md"; then CLAUDE_STATE="configured"; fi
 AGENTS_DOC_STATE="not configured"
 if [ -f "$GAME_DIR/AGENTS.md" ] && ! grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/AGENTS.md"; then AGENTS_DOC_STATE="configured"; fi
 
+# What this run could not do. The banner, the agent lines and the exit status must agree: an agent gating on the exit
+# code reported a 3.x upgrade or a lost hook as a success (review 2026-11-04).
+SETUP_PROBLEMS=""
+if [ "$HOOKS_MISSING" != 0 ]; then
+    SETUP_PROBLEMS="$SETUP_PROBLEMS  - $HOOKS_MISSING hook file(s) are missing (see MISSING above). Re-extract the toolkit zip."$'\n'
+fi
+SETTINGS_OK=1
+if [ ! -f "$GAME_DIR/.claude/settings.json" ]; then
+    SETTINGS_OK=""
+elif [ -n "$PY_FOUND" ] && ! MSYS_NO_PATHCONV=1 $PY_FOUND -B -c "import json,sys; json.load(open(sys.argv[1],encoding='utf-8'))" "$PY_ROOT/.claude/settings.json" >/dev/null 2>&1; then
+    SETTINGS_OK=""
+fi
+if [ -z "$SETTINGS_OK" ]; then
+    SETUP_PROBLEMS="$SETUP_PROBLEMS  - .claude/settings.json is missing or not valid JSON, so Claude Code loads no hooks. Re-extract the toolkit zip."$'\n'
+fi
+if [ -z "$PATHS_OK" ]; then
+    SETUP_PROBLEMS="$SETUP_PROBLEMS  - skyrim-paths.env could not be written, so the configured folders outside this one are not guarded."$'\n'
+fi
+if [ "${MIG_RC:-0}" != 0 ]; then
+    SETUP_PROBLEMS="$SETUP_PROBLEMS  - The 3.x migration failed (exit $MIG_RC, above), so your 3.x edits were not carried; they are in .claude/backups/."$'\n'
+fi
+if [ "$HOOKS_MISSING_CLAUDE" != 0 ] || [ -z "$SETTINGS_OK" ]; then CLAUDE_STATE="incomplete"; fi
+if [ "$HOOKS_MISSING_CODEX" != 0 ] && [ "$CODEX_STATE" = "configured" ]; then CODEX_STATE="incomplete"; fi
+
 echo ""
 echo "============================================"
-echo " Setup Complete!"
+if [ -n "$SETUP_PROBLEMS" ]; then
+    echo " Setup INCOMPLETE"
+else
+    echo " Setup Complete!"
+fi
 echo "============================================"
 echo ""
+if [ -n "$SETUP_PROBLEMS" ]; then
+    printf '%s\n' "$SETUP_PROBLEMS"
+fi
 echo "Agents in this folder:"
-if [ "$CLAUDE_STATE" = "configured" ]; then
+if [ "$CLAUDE_STATE" = "incomplete" ]; then
+    echo "  Claude Code: INCOMPLETE -- its hooks or settings are missing (above), so it is NOT guarded."
+elif [ "$CLAUDE_STATE" = "configured" ]; then
     echo "  Claude Code: CONFIGURED -- CLAUDE.md has your paths; its configured hooks judge recognized calls once loaded."
 else
     echo "  Claude Code: NOT CONFIGURED -- CLAUDE.md has no paths filled in (this run: --agent $AGENT_SEL)."
@@ -1146,7 +1311,9 @@ case "$CODEX_STATE/$AGENTS_DOC_STATE" in
     configured/*) CODEX_SUMMARY="hooks-only" ;;
     *) CODEX_SUMMARY="" ;;
 esac
-if [ "$CODEX_SUMMARY" = "both" ]; then
+if [ "$CODEX_STATE" = "incomplete" ]; then
+    echo "  Codex:       INCOMPLETE -- a file under .codex/hooks/ is missing (above), so Codex is NOT guarded. Re-extract the toolkit zip."
+elif [ "$CODEX_SUMMARY" = "both" ]; then
     echo "  Codex:       CONFIGURED -- approve the 2 hooks once in Codex's /hooks; until then Codex runs UNGUARDED."
 elif [ "$CODEX_SUMMARY" = "hooks-only" ]; then
     echo "  Codex:       hooks configured, but AGENTS.md has no paths filled in. To finish: bash setup.sh --agent codex"
@@ -1162,7 +1329,7 @@ echo "Installed:"
 echo "  CLAUDE.md                        -- Project instructions for Claude Code"
 echo "  AGENTS.md                        -- The same instructions for Codex and other agents"
 echo "  .codex/                          -- Codex hook definitions + entries (approve them in Codex /hooks)"
-echo "  KNOWLEDGEBASE.md                 -- 1,300+ lines of Skyrim modding knowledge"
+echo "  KNOWLEDGEBASE.md                 -- 2,000+ lines of Skyrim modding knowledge"
 echo "  skyrim-paths.env                 -- The paths the safety hooks guard (machine-local)"
 echo "  .claude/settings.json            -- Hook configuration"
 echo "  .claude/hooks/protect-bash.sh    -- Guards dangerous commands"
@@ -1171,6 +1338,7 @@ echo "  .claude/hooks/protect-mcp.sh     -- Guards DevBench (smp reset denied, v
 echo "  .claude/hooks/backup-before-edit.sh -- Auto-backups (Edit/Write/NotebookEdit) with audit trail"
 echo "  .claude/hooks/snapshot-before-tool.sh -- Snapshots .psc/.pex before non-read-only shell commands"
 echo "  .claude/hooks/session-kb-guard.sh -- Snapshots KNOWLEDGEBASE/CLAUDE.md/AGENTS.md once per session"
+echo "  .claude/hooks/save-sentinel.sh   -- After each call: reports saves changed with no backup first"
 echo "  tools/                           -- Helper scripts (AutoMod wrapper, esp-verify, NIF tools, nexus.sh, resaver-cli.sh)"
 echo "  .claude/backups/                 -- Backup storage"
 echo ""
@@ -1220,7 +1388,7 @@ echo "  DevBench     -- LIVE in-game inspect/console/Papyrus while you play:"
 echo "                  Nexus mod 181326 (alandtse). This one is a MOD, not a tools/ utility --"
 echo "                  install it with your mod manager (Vortex/MO2), not by hand into Data/."
 echo "                  Needs DevBench 1.11.0+; recorded API/docs reference: 1.28.0 (2026-10-11)."
-echo "                  Update the VR Address Library FIRST (0.276.1 metadata reference, 2026-10-08):"
+echo "                  Update the VR Address Library FIRST (0.279.0 is the newest seen):"
 echo "                  DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0. Reference dates do not recommend an upgrade."
 echo "                  dev-only, no gameplay change, no save data. Drive it via tools/devbench-cli.sh"
 echo "                  (bundled wrapper). Lets your agent test its own fixes in the running game instead"
@@ -1229,12 +1397,19 @@ echo ""
 echo "  House Carl   -- optional record queries and validated plugin authoring for both agents."
 echo "                  Separate setup: docs/housecarl.md (pinned backend, private environment, explicit order authority)."
 echo ""
-echo "You're ready to go! Start your agent in this folder and ask it about your mods."
+if [ -n "$SETUP_PROBLEMS" ]; then
+    echo "Setup did NOT finish: fix what is listed under Setup INCOMPLETE above, then run bash setup.sh again."
+else
+    echo "You're ready to go! Start your agent in this folder and ask it about your mods."
+fi
 
 # --- Exit status: 0, or 1 when something this run was explicitly asked to do did not happen ---
 # --agent codex names Codex alone: Codex left unconfigured means the run did nothing it was asked for.
 # --lock asked for the lock: a lock that did not apply is said above and reported here too.
 SETUP_RC=0
+if [ -n "$SETUP_PROBLEMS" ]; then
+    SETUP_RC=1
+fi
 if [ -n "$DO_PORTABLE" ] || [ -n "$DO_OPENCODE" ]; then
     echo ""
     echo "Neutral runtime: tools/agent-harness.py (capabilities, check, coverage, save-list, save-restore)."
@@ -1265,6 +1440,9 @@ if [ -n "$PATHS_BAD" ]; then
     SETUP_RC=1
 fi
 if [ -n "$WANT_LOCK" ] && [ "$LOCK_RC" != 0 ]; then
+    SETUP_RC=1
+fi
+if [ "$WANT_SAVE_LOCK" = yes ] && [ -n "$SAVE_LOCK_RC" ] && [ "$SAVE_LOCK_RC" != 0 ]; then
     SETUP_RC=1
 fi
 exit "$SETUP_RC"

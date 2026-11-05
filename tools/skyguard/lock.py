@@ -962,10 +962,13 @@ def _unlock_files(root, data_dir, t, names, chosen, manifest):
         except OSError as e:
             failed.append((name, "error " + e.__class__.__name__))
     remaining = {n: r for n, r in manifest.items() if n not in done and n not in settled}
-    try:
-        _write_manifest(root, t.edition, remaining)
-    except Refused as e:
-        return _res(2, str(e))
+    # No manifest and nothing unlocked: the lock was never applied. Writing one would switch the off-by-default lock on,
+    # because its existence is what "applied" means (relock_expired, session._engaged).
+    if manifest or done or remaining:
+        try:
+            _write_manifest(root, t.edition, remaining)
+        except Refused as e:
+            return _res(2, str(e))
     extra = "Already read-only before the lock, so still read-only: " + _names_list(kept, 3) + "." if kept else ""
     if failed:
         return _res(1, "Unlocked %d files; %d not unlocked." % (len(done), len(failed)),
@@ -1114,7 +1117,8 @@ def disable(root, session=None) -> Result:
         return _res(2, str(e))
     except (ValueError, OSError) as e:
         return _res(2, "Could not record the disable (%s)." % e.__class__.__name__)
-    return _res(0, "The lock is persistently disabled; every session start will say so until `bash tools/skyguard.sh lock enable`.")
+    return _res(0, "The lock is persistently disabled, so nothing relocks; every session start will say so until `bash "
+                   "tools/skyguard.sh lock enable`. Files already locked STAY locked: `bash tools/skyguard.sh lock unlock` lifts them.")
 
 
 def enable(root, session=None) -> Result:

@@ -578,7 +578,8 @@ def launch(root, name, days, size=200_000):
     return d
 
 
-def test_launch_logs_gzip_after_a_week_recycle_after_ninety_days_and_labelled_folders_stay(tree):
+def test_launch_logs_gzip_after_a_week_recycle_after_ninety_days_and_labelled_folders_stay(tree, monkeypatch):
+    monkeypatch.setattr(hk, "has_recycle_bin", lambda: True)    # FakeBin stands in for it; off Windows the plan keeps the log
     def stamp(days):
         return time.strftime("launch-%Y%m%d-%H%M%S", time.localtime(time.time() - days * DAY))
 
@@ -1109,9 +1110,10 @@ def test_the_sweep_never_follows_a_link_out_of_temp(tmp_path, monkeypatch, alone
         pytest.skip("cannot make a directory link here")
     stale(outside)
     fake = bin_for(tmp_path)
-    hk.sweep_temp(sweep_cfg(), temp=temp, recycler=fake)
+    result = hk.sweep_temp(sweep_cfg(), temp=temp, recycler=fake)
     assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep"
     assert fake.got == [] and link.exists(), "a link is never even offered to the bin"
+    assert result["rows"]["failed"] == 0, "a link is skipped at the candidate stage, not caught by a later check"
 
 
 def test_session_writes_a_note_only_when_there_is_something_to_say(tmp_path, monkeypatch):
@@ -1228,7 +1230,8 @@ def test_a_dir_the_bin_refuses_is_left_in_place_and_named(tmp_path):
     def picky(paths):
         out = {}
         for p in paths:
-            out.update({str(p): "too big for the Recycle Bin"} if "big" in str(p) else fake([p]))
+            # The name only: the whole path holds a random temp folder, and "zt0wdbig" refused the twin on CI.
+            out.update({str(p): "too big for the Recycle Bin"} if "big" in os.path.basename(str(p)) else fake([p]))
         return out
     res = hk.sweep_temp(sweep_cfg(), temp=temp, recycler=picky)
     assert refused.exists() and (refused / "sub" / "f.txt").read_text(encoding="utf-8") == "x"

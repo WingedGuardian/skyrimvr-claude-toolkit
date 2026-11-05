@@ -115,19 +115,37 @@ def mutation_shard(spec):
     return i - 1, n
 
 
+def twin_selected(item, files):
+    """Does a mutation twin concern one of `files`: the file it mutates, or the file of the test it expects to fail?"""
+    params = item.callspec.params
+    if "test_skyguard_timing.py" in params["test_id"]:       # its kill depends on the machine's speed: CI's to judge
+        return False
+    return params["relpath"] in files or params["test_id"].split("::")[0] in files
+
+
 def pytest_collection_modifyitems(config, items):
     """SKYGUARD_MUTATION_SHARD=i/n keeps every n-th mutation twin (by its position in MUTATIONS) and DESELECTS the
     rest, so CI can run the gate as n parallel jobs: one Windows mutation job was 258 of a run's 270 minutes (CI run
     40953576542). Deselection, not skipping: the collected count stays the whole gate (the floor in ci-leg.json still
     means what it did), the deselected twins are not "skipped" (the skip ceiling still bites), and the n shard logs
     summed by check_ci_leg.py are exactly one unsharded run. Everything else in the session is untouched."""
+    # SKYGUARD_MUTATION_FILES=a,b is the pre-push gate's selection, never CI's: only the twins of the files a push changed,
+    # at most SKYGUARD_MUTATION_LIMIT of them spread evenly, then the shard of what is left.
     shard = mutation_shard(os.environ.get("SKYGUARD_MUTATION_SHARD"))
-    if shard is None:
+    files = {f for f in os.environ.get("SKYGUARD_MUTATION_FILES", "").split(",") if f}
+    if shard is None and not files:
         return
-    i, n = shard
+    i, n = shard or (0, 1)
     prefix = "tests/test_mutations.py::test_guard_actually_bites["
-    twins = [it for it in items if it.nodeid.replace("\\", "/").startswith(prefix)]
-    dropped = [it for k, it in enumerate(twins) if k % n != i]
+    all_twins = [it for it in items if it.nodeid.replace("\\", "/").startswith(prefix)]
+    twins = all_twins
+    if files:
+        twins = [it for it in twins if twin_selected(it, files)]
+        limit = int(os.environ.get("SKYGUARD_MUTATION_LIMIT") or 0)
+        if limit and len(twins) > limit:
+            twins = twins[::-(-len(twins) // limit)]
+    kept = {id(it) for k, it in enumerate(twins) if k % n == i}
+    dropped = [it for it in all_twins if id(it) not in kept]
     if dropped:
         gone = set(id(it) for it in dropped)
         config.hook.pytest_deselected(items=dropped)

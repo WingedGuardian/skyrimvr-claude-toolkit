@@ -45,9 +45,9 @@ offline tools (xelib, Spriggit, ReSaver, PyNifly).
 mouse, keyboard or window focus, and choosing this desktop does not authorise desktop input:
 control the game through DevBench only. `run` owns the whole session: it points the game at
 SteamVR's null driver (OpenComposite's `openvr_api.dll` swapped for SteamVR's; `--park` also sets
-OpenComposite's SKSE plugins aside), starts SteamVR and the game, returns control once DevBench
-answers for the owned game at the main menu, waits for the game to exit, and attempts restoration
-in `finally`. An ownership or placement refusal keeps headless files and session evidence for inspection;
+OpenComposite's SKSE plugins aside), starts SteamVR and the game, waits until DevBench answers for the
+owned game at the main menu, then BLOCKS until the game exits and attempts restoration in `finally`.
+Detach it so you can keep working. An ownership or placement refusal keeps headless files and session evidence for inspection;
 observed SteamVR also blocks restoration until the user closes it. `background` needs the user's Steam client already open (it stays
 theirs); Steam is never owned or closed. End a session early with `bash tools/vr-headless.sh stop`
 (from another shell): it quits only the owned game, and only when DevBench shows it running and
@@ -96,7 +96,7 @@ builds fall back to a frame diff). Everything it documents (ports, `POST /api/to
 changelog and a diff of the tool descriptions against 1.24.0; 1.28.0 (2026-10-11) is the newest release this was
 read against; the one behaviour that did change is the Papyrus `call` rule below. **Keep the VR Address Library
 current before updating DevBench:** DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0 and needs a current
-Address Library. The newest VR Address Library seen when this was written is **0.276.1** (2026-10-04);
+Address Library. The newest VR Address Library seen when this was written is **0.279.0**;
 a stale Address Library is the usual reason an SKSE plugin fails to load.
 **Console capture:** 1.19 fixed capture when the output buffer is empty (#96) and 1.24 changed how
 console output is captured (#117). 1.28 (#130) makes `console exec` with `capture:true` return the

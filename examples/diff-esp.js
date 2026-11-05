@@ -35,7 +35,7 @@ function tryGetFormID(h, local = true) {
 }
 
 function fmtLocalFID(fid) {
-    return '0x' + (fid & 0x00FFFFFF).toString(16).toUpperCase().padStart(6, '0');
+    return '0x' + (fid >>> 0).toString(16).toUpperCase().padStart(8, '0');    // the master byte too: same low bits, other master, other record
 }
 
 // Catalog a file's records into a map: localFormID -> { sig, editorID, json }
@@ -158,8 +158,8 @@ async function main() {
                 }
 
                 if (orig.sig === 'GLOB') {
-                    const origVal = origObj['FLTV'] || origObj['FLTV - Value'];
-                    const modVal = modObj['FLTV'] || modObj['FLTV - Value'];
+                    const origVal = origObj['FLTV'] ?? origObj['FLTV - Value'];
+                    const modVal = modObj['FLTV'] ?? modObj['FLTV - Value'];
                     if (origVal !== modVal) {
                         console.log(`    Value: ${origVal} -> ${modVal}`);
                     }

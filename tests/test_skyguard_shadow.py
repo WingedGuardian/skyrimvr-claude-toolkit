@@ -503,7 +503,6 @@ def test_guards_without_a_subcommand_is_a_usage_error(tmp_path):
 
 
 def test_guards_refuses_a_state_folder_that_is_outside_the_sandbox(tmp_path):
-    from skyguard import lock
     out, sandbox = tmp_path / "elsewhere", tmp_path / "sbx"
     out.mkdir()
     sandbox.mkdir()
@@ -511,7 +510,6 @@ def test_guards_refuses_a_state_folder_that_is_outside_the_sandbox(tmp_path):
     code, text = _cli_raw(["guards", "off", "--project", str(out), "--session", SID],
                           {"SKYGUARD_LOCK_SANDBOX": str(sandbox)})
     assert code == 2 and "sandbox" in text and not (out / ".skyguard" / "state.json").exists()
-    assert lock.SandboxViolation  # the refusal is the lock module's own choke, not a second one
 
 
 # ---- the lift is written where the engine reads it, and only when it can be honoured ---------------------------

@@ -409,11 +409,21 @@ def test_a_slot_that_allows_everything_is_caught_by_the_decoy_case(tmp_path):
     """The classic bad adapter: map_payload returns a benign request whatever the agent sent."""
     c = _conf()
     evil = JSON_SLOTS.replace(
-        MAP_HEAD, 'return {"v": 1, "agent": "toy-json", "event": "pre_tool", "kind": "none"}\n    tool,', 1)
-    assert 'kind": "none"' in evil
+        MAP_HEAD, 'return {"v": 1, "agent": "toy-json", "event": "pre_tool", "cwd": "", "kind": "shell", "shell": "bash", '
+                  '"command": "echo hello"}\n    tool,', 1)
+    assert '"echo hello"' in evil
     d = _toy(tmp_path, evil)
     rows = c.run_conformance(d, JSON_PROFILE, _json_cases())
-    assert not _by(rows)["case:benign-write"].ok      # the engine refuses a request of no kind; the adapter relays it
+    assert not _by(rows)["case:decoy-plugin-write"].ok    # told "allow" for a plugin write
+    assert c.summary(rows).startswith("CONFORMANCE FAIL")
+
+
+def test_a_slot_that_sends_no_kind_at_all_is_refused_by_the_engine(tmp_path):
+    c = _conf()
+    evil = JSON_SLOTS.replace(
+        MAP_HEAD, 'return {"v": 1, "agent": "toy-json", "event": "pre_tool", "kind": "none"}\n    tool,', 1)
+    rows = c.run_conformance(_toy(tmp_path, evil), JSON_PROFILE, _json_cases())
+    assert not _by(rows)["case:benign-write"].ok          # the engine refuses it; the adapter relays that
     assert c.summary(rows).startswith("CONFORMANCE FAIL")
 
 
@@ -441,7 +451,7 @@ def test_a_slot_that_raises_or_exits_is_a_block_so_the_fail_closed_rows_pass(tmp
         assert not rows["fault:engine-deny-nonce"].ok, body      # the engine's reason never reached the agent
 
 
-def _gone(pid):
+def _gone_now(pid):
     if sys.platform == "win32":
         out = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid, "/NH"], capture_output=True, text=True).stdout
         return str(pid) not in out
@@ -450,6 +460,17 @@ def _gone(pid):
     except OSError:
         return True
     return False
+
+
+def _gone(pid, within=15.0):
+    """Termination is asynchronous, so a killed process can still be listed for a moment on a loaded machine. A real
+    survivor sleeps 120 s, so it still fails here."""
+    end = time.time() + within
+    while not _gone_now(pid):
+        if time.time() > end:
+            return False
+        time.sleep(0.5)
+    return True
 
 
 def test_a_slot_that_hangs_ends_in_a_failed_row_and_the_child_is_killed(tmp_path):

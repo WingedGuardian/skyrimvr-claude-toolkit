@@ -50,7 +50,7 @@ COVERAGE_STATES = ("HEALTHY", "DEGRADED", "NOT EXERCISED", "UNMEASURABLE")
 STAGES = ("invoked", "received", "evaluated", "emitted", "failed")
 STATUS_VALUES = ("evaluated", "partial", "failed")
 CLAUDE_HOOKS = ("protect-files", "protect-bash", "protect-mcp", "backup-before-edit", "snapshot-before-tool",
-                "session-kb-guard")
+                "session-kb-guard", "save-sentinel")
 CODEX_HOOKS = ("pre-tool", "session-start")
 SKEW_S = 300           # a stamp further ahead of "now" than this is a clock fault, not a record
 LATENCY_MAX_BYTES = 256 * 1024
@@ -452,6 +452,33 @@ def _installed(root):
     return out
 
 
+def _claude_wiring(root):
+    """{hook: why it cannot run} from .claude/settings.json: heartbeats say a hook ran, not that it still will. Hooks switched
+    off, one not registered, one registered whose script is gone. An absent settings file says nothing here (doctor and setup
+    report it)."""
+    settings = root / ".claude" / "settings.json"
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8"))
+    except OSError:
+        return {}
+    except ValueError:
+        return {h: ".claude/settings.json is not valid JSON, so Claude Code loads no hooks" for h in CLAUDE_HOOKS}
+    if not isinstance(data, dict):
+        return {h: ".claude/settings.json is not a JSON object" for h in CLAUDE_HOOKS}
+    if data.get("disableAllHooks") is True:
+        return {h: "disableAllHooks is set in .claude/settings.json, so no hook runs" for h in CLAUDE_HOOKS}
+    commands = json.dumps(data.get("hooks") or {})
+    out = {}
+    for h in CLAUDE_HOOKS:
+        registered = h + ".sh" in commands
+        present = (root / ".claude" / "hooks" / (h + ".sh")).is_file()
+        if registered and not present:
+            out[h] = "registered in .claude/settings.json, but its script is gone"
+        elif present and not registered:
+            out[h] = "its script is here, but .claude/settings.json does not register it"
+    return out
+
+
 def _writable(d):
     """Can a hook record here? Probed by writing, because os.access lies on Windows."""
     probe = Path(d) / ".canary-probe"
@@ -490,6 +517,9 @@ def report(root, stale_min=120, as_json=False, now=None, out=None, codex_config=
     hb = root / HB_REL
     rows, unreadable = [], False
     trust = _codex_trust(root, codex_config) if "codex" in installed else None
+    wiring = _claude_wiring(root) if "claude" in installed else {}
+    if wiring:
+        installed["claude"] = list(dict.fromkeys(installed["claude"] + [h for h in CLAUDE_HOOKS if h in wiring]))
     if hb.exists() and not os.access(str(hb), os.R_OK | os.X_OK):
         unreadable = True
     for agent, hooks in installed.items():
@@ -506,6 +536,8 @@ def report(root, stale_min=120, as_json=False, now=None, out=None, codex_config=
                 state, detail = "UNMEASURABLE", "telemetry directory is not writable -- hooks cannot record here"
             else:
                 state, detail = hook_state(d, h, now, stale_s=stale_min * 60, files=_files(agent))
+                if agent == "claude" and h in wiring:
+                    state, detail = "DEGRADED", wiring[h]
                 if (agent == "codex" and state == "NOT EXERCISED" and trust["overall"] == "trusted"
                         and not any(_has_records(d, x) for x in hooks)):
                     # Approved, yet NO Codex hook has left a single stage record: the entry never started (one
@@ -535,7 +567,9 @@ def report(root, stale_min=120, as_json=False, now=None, out=None, codex_config=
                   for s in COVERAGE_STATES}
     trust_bad = bool(trust) and (trust["overall"] in TRUST_BAD
                                  or (trust["overall"] == "unrunnable" and not trust.get("unrendered")))
-    trust_unknown = bool(trust) and trust["overall"] == "unknown"
+    # A folder Codex does not trust may not load its hooks at all: not proven, whatever the hashes say.
+    trust_unknown = bool(trust) and (trust["overall"] == "unknown" or (trust["overall"] == "trusted"
+                                                                       and trust.get("project_trust") == "untrusted"))
     if counts["DEGRADED"] or counts["NEVER INVOKED"] or cov_counts["DEGRADED"] or trust_bad:
         code = 1
     elif counts["UNMEASURABLE"] or cov_counts["UNMEASURABLE"] or unreadable or trust_unknown:

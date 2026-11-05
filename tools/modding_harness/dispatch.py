@@ -11,7 +11,7 @@ from typing import Callable
 
 from . import approval, profiles, workspace
 from .contracts import Result
-from .preservation import PreservationFailed, protects
+from .preservation import PreservationFailed, one_read, protects
 
 
 @dataclass(frozen=True)
@@ -98,10 +98,11 @@ class Dispatcher:
             if plan.unresolved:
                 return Outcome(Result("deny", "partial", "failed", reason="save scope unresolved: " + plan.unresolved))
             target = workspace.save_store(self.root, self.profile)
-            for path, operation in zip(action.paths, action.operations):
-                if operation in ("write", "move", "delete") and protects(
-                        path, [target.root], ancestor=operation in ("move", "delete")):
-                    return Outcome(Result("deny", "evaluated", reason="permanent save store is protected"))
+            with one_read():
+                for path, operation in zip(action.paths, action.operations):
+                    if operation in ("write", "move", "delete") and protects(
+                            path, [target.root], ancestor=operation in ("move", "delete")):
+                        return Outcome(Result("deny", "evaluated", reason="permanent save store is protected"))
             groups = {}
             operations = {}
             for mutation in plan.mutations:
@@ -127,7 +128,11 @@ class Dispatcher:
                                          len(keys)) for g in grants):
                         missing.append(approval.example(action.session_id, operation, members,
                                        action.command, bound, len(keys)))
-                if not operations or missing:
+                if not operations:
+                    return Outcome(Result("deny", "evaluated", "required", reason=
+                        "this wildcard matches no existing save, so there is nothing to approve: check the pattern, "
+                        "or name the saves"))
+                if missing:
                     return Outcome(Result("deny", "evaluated", "required", reason=
                         "typed canonical human approval required: " + (why or "scope mismatch") + "\n" + "\n".join(missing)))
             if not groups:

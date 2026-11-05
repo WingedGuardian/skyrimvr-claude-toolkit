@@ -43,7 +43,7 @@ def _path_pattern(path: str) -> re.Pattern:
 
 def _walk(v, subs):
     if isinstance(v, dict):
-        return {k: _walk(x, subs) for k, x in v.items()}
+        return {k: "<id>" if _is_id_key(k) else _walk(x, subs) for k, x in v.items()}
     if isinstance(v, list):
         return [_walk(x, subs) for x in v]
     if isinstance(v, str):

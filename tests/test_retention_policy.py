@@ -12,7 +12,7 @@ import re
 
 from conftest import REPO
 
-PINNED = "084bdd17bfc90466c757cd438b0fd6e05f7b60af7b8c2ed0a81b484f6aa24c4b"
+PINNED = "eaf181902477827d8ec978eb045157ef048a567148ff15aad83d3cd8d4dbf2e4"
 DOC = REPO / "docs" / "RETENTION.md"
 
 
@@ -29,10 +29,14 @@ def test_the_shared_policy_matches_the_pinned_text_shared_with_the_x4_toolkit():
                            "docs/RETENTION.md, then pin the new hash in both repos.".format(got))
 
 
-def test_a_one_character_edit_changes_the_hash():
-    text = DOC.read_bytes()
-    edited = text.replace(b"Forever", b"Forevr", 1)
-    assert hashlib.sha256(shared_section(edited)).hexdigest() != PINNED
+def test_the_pin_covers_the_whole_shared_section_and_nothing_outside_it():
+    """An edit to the section's first or last line must change the pinned hash, and one outside the markers must not."""
+    text = DOC.read_bytes().replace(b"\r\n", b"\n")
+    lines = shared_section(text).strip().split(b"\n")
+    for line in (lines[0], lines[-1]):
+        assert text.count(line) == 1, line
+        assert hashlib.sha256(shared_section(text.replace(line, line + b"!"))).hexdigest() != PINNED, line
+    assert hashlib.sha256(shared_section(text + b"\nan edit outside the markers\n")).hexdigest() == PINNED
 
 
 def test_the_example_config_loads_with_no_unknown_keys():

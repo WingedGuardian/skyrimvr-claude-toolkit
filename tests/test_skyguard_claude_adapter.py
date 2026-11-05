@@ -110,7 +110,7 @@ def test_run_protect_bash(tmp_path):
 
 def test_run_protect_files(tmp_path):
     r = _run("protect-files", json.dumps({"tool_input": {"file_path": "C:/Synthetic Games/Fake/Data/a.esp"}}), tmp_path)
-    assert r.returncode == 0 and json.loads(r.stdout) is not None
+    assert r.returncode == 0 and json.loads(r.stdout), r.stdout       # `{}` is an allow: this path must answer
 
 
 def test_run_backup_and_snapshot_silent_allow(tmp_path):

@@ -407,35 +407,20 @@ def test_port_matches_recorded_bash_verdict(tmp_path, monkeypatch, cid, layout, 
         assert got == (decision, text)
 
 
-# Accepted divergence (controller ruling, Task 3 fix round 1): next to a NON-ASCII letter, GNU grep in
-# a UTF-8 locale sees no word boundary while the port (re.ASCII) sees one. The port is therefore
-# STRICTER than bash here, never looser. Measured against the real hook on this machine: all four are allowed.
-RESIDUE = {   # input -> the decision the port gives today (bash allows every one of them)
-}
-# Task 8 (R11): the plugin-reference note that made these three stricter than bash is gone; a READ is silent,
-# so the port now agrees with bash on them.
+# Next to a NON-ASCII letter, GNU grep in a UTF-8 locale sees no word boundary while the port (re.ASCII) sees one. The
+# port used to be stricter than bash on these; Task 8 (R11) removed the plugin-reference note, a READ is silent, and
+# Task 9 settled the last one, so the port now agrees with bash on all of them.
 RESIDUE_RESOLVED = (
     "cat My.espé",
     "cat a.esp b",
     "cat X.ESPİ",
     f'Champollioné "{GAME}/Data/Scripts/Foo.pex"',   # Task 9: not Champollion
 )
-STRICTNESS = {"allow": 0, "advise": 1, "ask": 2, "deny": 3}
 
 
 @pytest.mark.parametrize("cmd", RESIDUE_RESOLVED)
 def test_unicode_residue_on_a_plugin_read_now_matches_bash(tmp_path, cmd):
     assert run(cmd, tmp_path)[:3] == ("allow", "", "")
-
-
-def test_unicode_word_boundary_residue_is_never_looser(tmp_path):
-    """Pins the port's actual decision; bash allows all of these, so the port may only be stricter. Task 9 emptied
-    the set (every residue now agrees with bash); the check stays so a new residue is pinned, not silent."""
-    for cmd, expected in sorted(RESIDUE.items()):
-        v = run(cmd, tmp_path)
-        py = "advise" if v.decision == "allow" and v.context else v.decision
-        assert py == expected
-        assert STRICTNESS[py] > STRICTNESS["allow"]
 
 
 def test_every_message_constant_equals_the_bash_text():

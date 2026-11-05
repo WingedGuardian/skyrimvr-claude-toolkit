@@ -6,13 +6,15 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
+import sys
 import tempfile
 import uuid
 
 from . import Refusal
 from .files import backup, contained, exclusive, json_write, plain_plugin, publish, sha
-from .order import capture, plugin_header
+from .order import BASE as IMPLICIT_MASTERS, capture, plugin_header
 from .runtime import Backend, READS, WRITES, context, response_json
 
 
@@ -87,29 +89,90 @@ def check_arguments(name, arguments, config):
     return a
 
 
+def _masters_of(candidate, active):
+    """The active plugins xEdit loads for `candidate`: the implicit masters, then its masters' closure. Only these are
+    linked (the user's exception covers masters, not the whole load order)."""
+    by_name = {name.casefold(): (name, Path(path)) for name, path in active.items()}
+    out, queue = {}, [plugin_header(candidate)["masters"]]
+    queue.append([n for n in IMPLICIT_MASTERS])
+    while queue:
+        for wanted in queue.pop():
+            found = by_name.get(wanted.casefold())
+            if found is None or found[0] in out or wanted.casefold() == candidate.name.casefold():
+                continue
+            out[found[0]] = found[1]
+            queue.append(plugin_header(found[1])["masters"])
+    return out
+
+
+def _drive(path):
+    return Path(path).anchor.lower()
+
+
+def _scratch_parent(config, masters):
+    """A hard link needs one volume, and masters are never copied, so the scratch folder follows the masters."""
+    drives = {_drive(path) for path in masters.values()}
+    if len(drives) > 1:
+        raise Refusal("The read-only check needs its masters on one drive, and they are on: " + ", ".join(sorted(drives)))
+    temp = Path(tempfile.gettempdir())
+    if not drives or _drive(temp) in drives:
+        return temp
+    root = Path(config["root"])
+    if _drive(root) in drives:
+        return root / ".housecarl-tmp"
+    raise Refusal("The read-only check needs scratch space on the masters' drive ({}); set TEMP to a folder there.".format(
+        ", ".join(sorted(drives))))
+
+
 def independent_check(config, candidate, snapshot, before=None, allowed=None):
     """xEdit parses every candidate record; preserves untouched records by canonical JSON."""
     verifier = Path(config["root"]) / "tools/housecarl-verify.js"
-    work = Path(tempfile.mkdtemp(prefix="hc-xedit-"))
+    masters = _masters_of(candidate, snapshot.paths)
+    parent = _scratch_parent(config, masters)
+    parent.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="hc-xedit-", dir=str(parent)))
+    try:                                  # housekeep's temp sweep retires a leftover only with this declaration
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import housekeep_backups
+        housekeep_backups.mark_disposable_temp(work, Path(config["root"]))
+    except Exception:
+        pass                              # without it the sweep only keeps the folder
     data = work / "Data"
     data.mkdir(parents=True)
-    # Only a read-only verifier sees these master hardlinks; the writer never gets this directory.
-    for name, original in snapshot.paths.items():
-        dest = data / name
-        if name.casefold() == candidate.name.casefold():
-            shutil.copyfile(candidate, dest)
-        else:
-            try:
-                os.link(original, dest)
-            except OSError:
-                shutil.copyfile(original, dest)
-    if not (data / candidate.name).exists():
-        shutil.copyfile(candidate, data / candidate.name)
     out = work / "inspection.json"
-    env = os.environ.copy()
-    env["HOUSECARL_XELIB_ROOT"] = config.get("xelib_root", config["root"])
-    result = subprocess.run([config.get("node", "node"), str(verifier), str(work), candidate.name, str(out)],
-                            env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+    # USER EXCEPTION, 2026-11-02, this check only: the "never hard-link staged inputs" rule is waived here because xEdit
+    # needs the candidate and every master in one folder. Conditions: the verifier is read-only (tools/housecarl-verify.js
+    # never saves), the links last this one call, and masters are never copied. A linked view is the real file under a
+    # second name, so it is gone before this call returns, also when the check fails or times out, and every master is
+    # compared afterwards: House Carl's backups cover the plugin being edited, not the masters.
+    before_stats = {}
+    try:
+        for name, original in masters.items():
+            info = os.stat(original)
+            if not info.st_mode & stat.S_IWRITE:
+                # Its link could not be removed without changing the attribute the real file shares.
+                raise Refusal("Master {} is read-only, so the read-only check cannot link it safely. Clear that "
+                              "attribute, or lift the toolkit's file lock, and retry.".format(name))
+            try:
+                os.link(original, data / name)
+            except OSError as exc:
+                raise Refusal("Cannot link master {} for the read-only check ({}). If the toolkit's file lock is on, "
+                              "lift it and retry; masters are never copied.".format(name, exc)) from exc
+            before_stats[name] = (original, info.st_size, info.st_mtime_ns)
+        shutil.copyfile(candidate, data / candidate.name)
+        env = os.environ.copy()
+        env["HOUSECARL_XELIB_ROOT"] = config.get("xelib_root", config["root"])
+        result = subprocess.run([config.get("node", "node"), str(verifier), str(work), candidate.name, str(out)],
+                                env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+    finally:
+        shutil.rmtree(data, ignore_errors=True)
+        if data.exists():
+            raise Refusal("The read-only check could not remove its links in {}: remove that folder.".format(data))
+        for name, (original, size, mtime) in before_stats.items():
+            info = os.stat(original)
+            if (info.st_size, info.st_mtime_ns) != (size, mtime):
+                raise Refusal("Master {} changed during the read-only check. It is not backed up here: restore it from "
+                              "your mod manager or Steam.".format(name))
     # The installed xelib has a documented native teardown exit-code problem. Require both markers and data.
     if "RESULT: OK" not in result.stdout or not out.is_file():
         detail = (result.stderr + result.stdout).replace("\0", "")
@@ -117,7 +180,7 @@ def independent_check(config, candidate, snapshot, before=None, allowed=None):
     obj = json.loads(out.read_text(encoding="utf-8"))
     shutil.copyfile(out, candidate.parent / ("xedit-" + uuid.uuid4().hex + ".json"))
     # This is this call's own shallow scratch directory, never a backup or a save folder.
-    if work.resolve().parent != Path(tempfile.gettempdir()).resolve() or not work.name.startswith("hc-xedit-"):
+    if work.resolve().parent != parent.resolve() or not work.name.startswith("hc-xedit-"):
         raise Refusal("Unexpected verifier scratch location; retained for inspection.")
     shutil.rmtree(work)
     if not obj.get("complete") or not isinstance(obj.get("records"), dict):
@@ -211,8 +274,9 @@ class Gateway:
             if original.name.lower() in {"skyrim.esm", "update.esm", "dawnguard.esm", "hearthfires.esm",
                                          "dragonborn.esm", "skyrimvr.esm"}:
                 raise Refusal("Edit a patch rather than rewriting an official master.")
-            preservation = backup(original, Path(config["state_dir"]) / "backups")
-            digest = preservation["sha256"]
+            if not arguments.get("dry_run"):     # backups are kept forever; a dry run publishes nothing to restore from
+                preservation = backup(original, Path(config["state_dir"]) / "backups")
+                digest = preservation["sha256"]
             staged = work / "mods/Target" / original.name
             staged.parent.mkdir(parents=True)
             shutil.copyfile(original, staged)

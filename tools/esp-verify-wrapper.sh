@@ -142,8 +142,8 @@ compare_inventory() {
   report="$(awk -F'\t' -v name="$name" '
     function fid(t){ sub(/:.*/,"",t); return t }
     function mst(t){ sub(/^[^:]*:/,"",t); return t }
-    NR==FNR { key=$1 SUBSEP fid($2); rmast[key]=$2; rkeys[NR]=$1 "\t" $2; rn++; next }
-    { key=$1 SUBSEP fid($2); amast[key]=$2; akeys[NR-rn]=$1 "\t" $2; an++ }
+    NR==FNR { key=$1 SUBSEP fid($2); rmast[key]=$2; rkeys[NR]=$1 "\t" $2; rn++; rcount[$1 "\t" $2]++; next }
+    { key=$1 SUBSEP fid($2); amast[key]=$2; akeys[NR-rn]=$1 "\t" $2; an++; acount[$1 "\t" $2]++ }
     END {
       crit=0
       for (i=1;i<=rn;i++) {
@@ -160,6 +160,11 @@ compare_inventory() {
         split(akeys[i],c,"\t"); ed=c[1]; tok=c[2]; key=ed SUBSEP fid(tok)
         if (key in seen) continue
         if (!(key in rmast)) printf "  + reference added (info)  %-22s %s\n", ed, tok
+      }
+      # Two identical entries (a leveled list) losing one: the reference is still present, so count them.
+      for (k in rcount) if ((k in acount) && acount[k] < rcount[k]) {
+        split(k,c,"\t"); printf "  \342\232\240 REFERENCE DROPPED  %-30s %s (%d -> %d)\n", c[1], c[2], rcount[k], acount[k]
+        crit++
       }
       exit (crit>0)
     }

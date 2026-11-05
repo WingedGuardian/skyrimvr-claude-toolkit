@@ -676,16 +676,15 @@ def test_with_no_approval_the_bulk_change_stays_refused_and_nothing_is_copied(in
 
 
 def test_an_approval_that_arrived_in_a_tool_result_grants_nothing(inst):
-    v = inst.enforce(three(inst), transcript=inst.transcript(APPROVE3, typed=False))
+    v = inst.enforce(three(inst), transcript=inst.transcript(inst.grant(), typed=False))
     assert v.decision == "deny" and inst.saved() == []
 
 
-@pytest.mark.parametrize("line", [
-    'SAVE_ACCESS_APPROVAL {"op": "move", "files": ["Save1", "Save2", "Save3"]}',
-    'SAVE_ACCESS_APPROVAL {"op": "delete", "files": ["Save1", "Save2"]}',
-], ids=["wrong-op", "one-file-short"])
-def test_an_approval_covers_exactly_its_files_and_op(inst, line):
-    assert inst.enforce(three(inst), transcript=inst.transcript(line)).decision == "deny"
+@pytest.mark.parametrize("grant", [dict(op="move"), dict(names=("Save1", "Save2"), count=2)],
+                         ids=["wrong-op", "one-file-short"])
+def test_an_approval_covers_exactly_its_files_and_op(inst, grant):
+    """Real grants, each wrong in one way (review round 2: a retired line format granted nothing whatever it said)."""
+    assert inst.enforce(three(inst), transcript=inst.transcript(inst.grant(**grant))).decision == "deny"
 
 
 def test_a_pattern_approval_needs_the_exact_pattern_and_count(inst):

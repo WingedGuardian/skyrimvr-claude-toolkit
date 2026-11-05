@@ -25,17 +25,18 @@ loop, function body or conditional chain. Later commands and substitutions are
 checked at each location; an unconditional absolute `cd` collapses the alternatives.
 Equal locations coalesce. More than 16 alternatives per frame, or an incomplete
 parse after location ambiguity, refuses with S-SHELL-UNREAD. This is conservative
-location analysis; shell functions and aliases are still not expanded. Function,
+location analysis. A function defined in the same command is read at each call, and aliases are expanded; a function
+defined twice refuses, and a `shift` under a branch refuses to parse. Function,
 coprocess and piped/background brace bodies keep their own locations. Text piped
 into a shell is checked at every possible reader location. A relative `cd` in a
-loop has no proved finite repetition bound and refuses with S-SHELL-UNREAD.
+loop is tracked; a target it cannot name is an unknown location.
 
 Known false-deny shape (accepted in the final review): after a conditional `cd`,
 a later parse failure or token-budget overflow can produce S-SHELL-UNREAD even
 when the earlier ambiguity was inside a subshell or a later absolute `cd` settled
 the location. For example, `mkdir -p out && cd out; echo 'unterminated` refuses.
 
-`tests/test_guard_coverage.py` parses this file and the shipped `agent/targets/claude/settings.json` and fails
+In a development clone (`tests/` is not in the release zip), `tests/test_guard_coverage.py` parses this file and the shipped `agent/targets/claude/settings.json` and fails
 if the two disagree (a route marked guarded that no matcher fires on, a route marked uncovered that a
 matcher now fires on, a matcher naming a tool this table lacks, or a summary count that is wrong).
 

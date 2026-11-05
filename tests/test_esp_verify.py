@@ -21,6 +21,7 @@ case "${FAKE_SPRIGGIT_MODE:-none}" in
   none) ;;
   noref) printf 'EditorID: Lonely\\n' > "$out/Lonely - 000800_Mod.esp.yaml" ;;
   refs) printf 'Keyword: 013794:Skyrim.esm\\n' > "$out/Thing - 000800_Mod.esp.yaml" ;;
+  refs-twice) printf 'Keyword: 013794:Skyrim.esm\\nKeyword: 013794:Skyrim.esm\\n' > "$out/Thing - 000800_Mod.esp.yaml" ;;
   odd) printf '%s\\n' "Race: 012345:Dawn of Skyrim (Director's Cut).esp" "Keyword: 0A0B0C:[COCO] Lingerie & Co+, v2.esp" \
          "Keyword: 013794:Skyrim.esm" > "$out/Thing - 000800_Mod.esp.yaml" ;;
   odd-remapped) printf '%s\\n' "Race: 012345:Patch.esp" "Keyword: 0A0B0C:[COCO] Lingerie & Co+, v2.esp" \
@@ -182,3 +183,10 @@ def test_the_package_version_defaults_to_the_pin(tmp_path):
     pin = json.loads((REPO / ".config" / "dotnet-tools.json").read_text(encoding="utf-8"))["tools"]["spriggit.cli"]["version"]
     assert _run_local(tmp_path, "snapshot").returncode == 0
     assert (tmp_path / "ver.txt").read_text().strip() == pin
+
+
+def test_one_of_two_identical_references_going_missing_is_a_drop(tmp_path):
+    """Review round 3: a leveled list with two identical entries lost one, and this said "none dropped"."""
+    assert _run(tmp_path, "refs-twice", "snapshot").returncode == 0
+    r = _run(tmp_path, "refs", "verify")
+    assert r.returncode != 0 and "REFERENCE DROPPED" in r.stdout, r.stdout + r.stderr

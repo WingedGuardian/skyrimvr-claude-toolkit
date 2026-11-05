@@ -83,10 +83,11 @@ std::vector<const GlobalData *> Globals(const SaveFile &s) {
       out.push_back(&g);
   return out;
 }
-std::vector<std::uint8_t> Bytes(const GlobalData &g) {
+std::vector<std::uint8_t> Bytes(const GlobalData &g, bool le) {
   if (!g.papyrus)
     return g.raw;
   Writer w;
+  w.le = le;
   g.papyrus->write(w);
   return w.buf;
 }
@@ -126,6 +127,9 @@ bool Match(const SaveFile &s, const RefID &id, const std::string &query) {
   if (n > 0xFFFFFFFFu)
     throw std::runtime_error("form id exceeds 32 bits");
   const auto full = s.formIDOf(id);
+  // A bare id with a load-order byte names that form; only a bare low id, or plugin:id, matches by the low 24 bits.
+  if (plug.empty() && (n >> 24) != 0)
+    return full == n;
   return (full & 0xFFFFFF) == (n & 0xFFFFFF) &&
          (plug.empty() || EqualsNoCase(s.pluginOf(full), plug));
 }
@@ -146,7 +150,7 @@ J Info(SaveFile &s) {
   // The native header does not distinguish SE and VR reliably. The local
   // compatibility adapter may label its known VR corpus; the reusable API must
   // not claim a runtime based only on matching save-format versions.
-  j.o["game"] = S("SKYRIM_SE");
+  j.o["game"] = S(s.isLE() ? "SKYRIM_LE" : "SKYRIM_SE");
   j.o["changeForms"] = N(s.changeForms.size());
   j.o["scriptInstances"] = N(p.instances.size());
   j.o["scripts"] = N(p.scripts.size());
@@ -175,6 +179,14 @@ J Dump(SaveFile &s, const Arguments &a) {
   auto &rows = j.o["items"].a;
   const auto limit = Limit(a);
   const auto filter = Low(a.option("--script"));
+  // A filter a subsystem cannot apply is an error: an unfiltered list read as the filtered answer.
+  const bool scripted = sub == "scriptinstances" || sub == "references" || sub == "scripts";
+  if (a.has("--script") && !scripted)
+    throw std::runtime_error("dump " + sub + " does not take --script");
+  if (a.has("--undefined-only") && !scripted && sub != "activescripts")
+    throw std::runtime_error("dump " + sub + " does not take --undefined-only");
+  if (a.has("--type") && sub != "changeforms")
+    throw std::runtime_error("dump " + sub + " does not take --type");
   bool more = false;
   auto emit = [&](J row) {
     if (rows.size() < limit)
@@ -479,13 +491,23 @@ J Writers(const Papyrus &p) {
         j.o["pending_writer_calls"].a.push_back(
             S(Hex(t.id, 8) + ":" + p.str(f.scriptName) + "." + p.str(f.event)));
   }
+  std::size_t unread = 0;
   for (const auto *ss : {&p.suspended1, &p.suspended2})
-    for (const auto &x : *ss)
+    for (const auto &x : *ss) {
       if (x.data)
         add("suspended:" + Hex(x.id, 8), *x.data);
-  for (const auto &m : p.functionMessages)
+      else
+        ++unread;
+    }
+  for (const auto &m : p.functionMessages) {
     if (m.data)
       add("message:" + (m.id ? Hex(*m.id, 8) : "none"), *m.data);
+    else
+      ++unread;
+  }
+  // "None found" is only as good as what could be read.
+  j.o["unreadEntries"] = N(unread);
+  j.o["complete"] = B(unread == 0);
   return j;
 }
 J Find(SaveFile &s, const Arguments &a) {
@@ -497,8 +519,11 @@ J Find(SaveFile &s, const Arguments &a) {
       form = true;
   } catch (const std::exception &) {
   }
+  // Hex-valid text (`Fade`, `ACE`) may be a script name too: a bare query searches both.
+  const bool byName = !form || q.find(':') == std::string::npos;
   auto j = Object();
   j.o["query"] = S(q);
+  j.o["alsoScriptName"] = B(form && byName);
   j.o["mode"] =
       S(form ? (q.find(':') != std::string::npos ? "plugin:formid"
                                                  : "formid(any-plugin)")
@@ -506,8 +531,8 @@ J Find(SaveFile &s, const Arguments &a) {
   j.o["hits"] = Array();
   auto &hits = j.o["hits"].a;
   for (const auto &i : p.instances)
-    if (form ? Match(s, i.refID, q)
-             : Low(p.str(i.script)).find(Low(q)) != std::string::npos) {
+    if ((form && Match(s, i.refID, q)) ||
+        (byName && Low(p.str(i.script)).find(Low(q)) != std::string::npos)) {
       auto x = Instance(s, p, i);
       x.o["kind"] = S("scriptInstance");
       hits.push_back(x);
@@ -521,7 +546,8 @@ J Find(SaveFile &s, const Arguments &a) {
         x.o["type"] = S(ChangeFormTypeName(f.typeCode()));
         hits.push_back(x);
       }
-  } else {
+  }
+  if (byName) {
     for (const auto &r : p.references)
       if (Low(p.str(r.script)).find(Low(q)) != std::string::npos) {
         auto x = Object();
@@ -611,8 +637,8 @@ J GlobalData(SaveFile &s, SaveFile *second) {
     auto x = Object();
     const auto *ga = i < a.size() ? a[i] : nullptr;
     const auto *gb = i < b.size() ? b[i] : nullptr;
-    auto ba = ga ? Bytes(*ga) : std::vector<std::uint8_t>{};
-    auto bb = gb ? Bytes(*gb) : std::vector<std::uint8_t>{};
+    auto ba = ga ? Bytes(*ga, s.isLE()) : std::vector<std::uint8_t>{};
+    auto bb = gb ? Bytes(*gb, second->isLE()) : std::vector<std::uint8_t>{};
     if (second && ga && gb && ga->type == gb->type && ba == bb)
       continue;
     x.o["index"] = N(i);
@@ -795,6 +821,7 @@ json::Value Query(const std::string &op, SaveFile &s, const Arguments &a,
     j.o["changeForms"] = N(s.changeForms.size());
     j.o["method"] = S("native serialization and same-parser reopen in memory; "
                       "no temporary save deletion");
+    j.o["scope"] = S("the parsed model, not the file's bytes: what the first parse does not keep is not compared");
   } else if (op == "changeform-diff") {
     if (!second)
       throw std::runtime_error("second save required");
@@ -852,6 +879,17 @@ json::Value Query(const std::string &op, SaveFile &s, const Arguments &a,
       j.o["warnings"].a.push_back(S(w));
   } else
     throw std::runtime_error("structured query not yet qualified: " + op);
+  // The parser flagged this save: an answer read from it must say so, whatever the query.
+  std::size_t flagged = s.problems.size() + (second ? second->problems.size() : 0);
+  if (flagged) {
+    j.o["parseProblems"] = N(flagged);
+    j.o["parseProblemSamples"] = Array();
+    const SaveFile *both[] = {&s, second};
+    for (const auto *from : both)
+      if (from)
+        for (std::size_t i = 0; i < from->problems.size() && i < 8; ++i)
+          j.o["parseProblemSamples"].a.push_back(S(text::ToUtf8(from->problems[i])));
+  }
   j.o["ok"] = B(true);
   j.o["op"] = S(op);
   j.o["schemaVersion"] = N(1);

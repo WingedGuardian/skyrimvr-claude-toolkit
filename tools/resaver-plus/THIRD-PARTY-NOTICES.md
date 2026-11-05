@@ -2,7 +2,7 @@
 
 `build.py` builds `resaverpp-cli.exe` with the GUI off. That executable statically links two third-party libraries
 from upstream's `third_party/` folder, fetched at build time (none of their source ships here). Their notices,
-copied from the pinned upstream commit `0d48f60cb8a69b367abfbd78d58418e64c507da5`, follow.
+copied from the pinned upstream commit `098eb8c1c3a23552c7662a2083f4aca9a2ff41f4`, follow.
 
 ## LZ4 (`third_party/lz4/lz4.c`): BSD 2-Clause
 

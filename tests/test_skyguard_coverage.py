@@ -99,6 +99,7 @@ def _config(tmp_path, root, trusted: bool, name="config.toml") -> Path:
     if trusted:
         for k, h in exp.items():
             lines += ["[hooks.state.'{}']".format(k), 'trusted_hash = "{}"'.format(h), ""]
+        lines += ["[projects.'{}']".format(Path(root).resolve()), 'trust_level = "trusted"', ""]
     p = tmp_path / name
     p.write_text("\n".join(lines), encoding="utf-8")
     return p

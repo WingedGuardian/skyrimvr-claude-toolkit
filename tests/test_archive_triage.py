@@ -156,7 +156,7 @@ def test_all_lists_every_file_and_every_skipped_entry(tmp_path, sevenz):
     game = make_game(tmp_path, files=INSTALLED)
     r = run(make_archive(tmp_path, "ExampleMod.7z", ENTRIES), "--all", sevenz=sevenz, game=game)
     for shown in ("SAME    Data/textures/exm/a.dds", "NEW     Data/textures/exm/b.dds",
-                  "SAME    Data/SKSE/Plugins/ExampleFramework.ini"):
+                  "SAME    Data/SKSE/Plugins/ExampleFramework.ini", "?       ExampleMod/readme.txt"):
         assert shown in r.stdout, r.stdout
 
 

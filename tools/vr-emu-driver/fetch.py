@@ -24,6 +24,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import urllib.request
@@ -91,11 +92,15 @@ def install(files: dict, dest: Path = PACKAGE) -> None:
         raise FetchError("{} already holds a different package; move it aside (it is yours to keep) and run "
                          "this again".format(dest))
     stage = Path(tempfile.mkdtemp(prefix="fetch-", dir=str(BUILD)))     # same-run scratch
-    for rel, body in files.items():
-        target = stage.joinpath(*PurePosixPath(rel).parts)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(body)
-    os.replace(str(stage), str(dest))
+    try:
+        for rel, body in files.items():
+            target = stage.joinpath(*PurePosixPath(rel).parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(body)
+        os.replace(str(stage), str(dest))
+    finally:
+        if stage.exists():
+            shutil.rmtree(str(stage), ignore_errors=True)
 
 
 def main(argv) -> int:

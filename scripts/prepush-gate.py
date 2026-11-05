@@ -19,9 +19,10 @@ Steps, each red on its own:
      the files this push changes (`git diff --name-only BASE...HEAD`: a changed test file runs itself; a changed
      tools/ or scripts/ module runs every tests/test_*<its stem>*.py; the guard adapters run the wrapper tests; and
      EVERY test file whose text names a changed file's basename runs, since that is the test that goes red on it).
-     Two processes: the timing/deadline files alone (10-minute cap), the rest together (20-minute cap).
+     One process per test file, at most eight at once, plus timing/deadline, corpus and rule messages as their own groups.
+     Then a spread sample of at most 200 mutation twins of the changed files; CI runs every twin.
 
-BASE defaults to the branch's upstream, else the merge-base with origin/master. A dirty working tree is reported
+BASE defaults to the branch's upstream (a base it cannot read stops the gate: it would select no tests), else the merge-base with origin/master. A dirty working tree is reported
 (the gate runs on the tree, the push sends the commits). Exit 0 = passed, 1 = a step failed, 2 = could not run.
 Runs under the resource budget when the hook launches it (rb.py); prints each step's seconds so growth is seen.
 """
@@ -53,6 +54,7 @@ SENTINELS = [
     "tests/test_gen_agent_trees.py",       # agent/ -> generated files
     "tests/test_ci_leg.py",                # the CI tripwires
     "tests/test_workflows.py",             # the workflow files
+    "tests/test_no_real_install_path.py",  # scans every test file, so a push that adds one must run it (CI 41754337406)
     # NOT here: tests/test_release_build.py and test_release_payload.py build a release payload per case and ran the
     # gate past its 20-minute step limit (2026-10-31); CI's release-build job runs them on every push, and the pin
     # audits that actually went stale (thirdparty, spriggit) are above. They still run when the push changes them.
@@ -87,6 +89,11 @@ def base_rev(explicit):
         if mb:
             return mb
     return ""
+
+
+def base_readable(base):
+    """A typo in --base would otherwise read as "nothing changed" and run no changed-file tests."""
+    return bool(base) and bool(_git("rev-parse", "--verify", "-q", base + "^{commit}"))
 
 
 def changed_files(base):
@@ -148,14 +155,51 @@ def tests_for(changed):
     return out
 
 
-def rest_chunks(files, per_chunk=6, max_chunks=4):
-    """Split the changed-file/sentinel test files into round-robin chunks: one per `per_chunk` files, at most
-    `max_chunks`, each run as its own process under its own time cap. Every file lands in exactly one chunk."""
-    files = list(files)
-    if not files:
+def twin_selection(changed, added_lines="", aliases=None):
+    """The files whose mutation twins this push must run: what it changed, and every file a line added to the twin table
+    names, spelled out or through one of the table's aliases. CI run 41560815549 went red on three surviving twins of a file
+    this gate's other steps had passed in full: those tests pass on the pristine tree, so only running the twin shows it."""
+    files = {p for p in changed if p != "tests/test_mutations.py"}
+    files |= set(re.findall(r"(?:tools|scripts|agent|tests)/[\w./-]+\.\w+|setup\.sh", added_lines))
+    for alias, path in (aliases or {}).items():
+        if re.search(r"\b" + re.escape(alias) + r"\b", added_lines):
+            files.add(path)
+    return sorted(files)
+
+
+def twin_aliases():
+    text = (REPO / "tests" / "test_mutations.py").read_text(encoding="utf-8", errors="replace")
+    return dict(re.findall(r'^(_[A-Z][A-Z0-9_]*) = "([^"\n]+)"$', text, re.M))
+
+
+def twin_steps(py, base, changed, processes=4, per_process=50):
+    """At most processes x per_process twins, each process under the cap of the other groups: a big branch gets a spread
+    sample here and every twin on CI, not a push refused on time. They run after the other groups, never beside them: 600
+    twins beside the timing tests starved those past their limits (2026-11-03, a gate that refused on load alone)."""
+    added = ""
+    if "tests/test_mutations.py" in changed and base:
+        diff = _git("diff", "-U0", base + "...HEAD", "--", "tests/test_mutations.py")
+        added = "\n".join(l for l in diff.splitlines() if l.startswith("+"))
+    files = twin_selection(changed, added, twin_aliases())
+    env = dict(os.environ, SKYGUARD_MUTATION_FILES=",".join(files), SKYGUARD_MUTATION_LIMIT=str(processes * per_process))
+    node = "tests/test_mutations.py::test_guard_actually_bites"
+    listed = subprocess.run([py, "-B", "-m", "pytest", "-p", "no:cacheprovider", "--collect-only", "-q", node], cwd=REPO, env=env,
+                            capture_output=True, text=True, encoding="utf-8", errors="replace")
+    count = sum(1 for l in listed.stdout.splitlines() if l.startswith(node))
+    if listed.returncode not in (0, 5):
+        raise RuntimeError("could not list the twins of the changed files:\n" + (listed.stdout + listed.stderr)[-1500:])
+    if not count:
         return []
-    n = min(max_chunks, max(1, -(-len(files) // per_chunk)))
-    return [files[k::n] for k in range(n)]
+    if count > processes * per_process:
+        # A tree older than the selector ignores these variables, and every process then runs the whole table: four
+        # identical copies stopped at 6% of 2,700 twins on master (2026-11-03). CI runs every twin on that tree.
+        print("   this tree has no twin selector ({} twins listed): twins are left to CI".format(count), flush=True)
+        return []
+    n = min(processes, -(-count // 20))
+    print("   {} mutation twin(s) of the changed files, in {} process(es)".format(count, n), flush=True)
+    return [("mutation twins of changed files {}/{}".format(k + 1, n),
+             [py, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-v", "-rfE", node], 1200,
+             dict(env, SKYGUARD_MUTATION_SHARD="{}/{}".format(k + 1, n))) for k in range(n)]
 
 
 class Gate:
@@ -198,18 +242,24 @@ class Gate:
         return ok
 
 
-    def parallel(self, steps):
-        """Run several steps at once, each to its own log with its own timeout; report each as step() would."""
+    def parallel(self, steps, workers=None):
+        """Run steps at once, at most `workers` at a time, each to its own log and under its own timeout from when it starts; report
+        each as step() would. A free worker takes the next step, so nothing has to predict what a step costs."""
         t = time.time()
+        steps = list(steps)
+        limit = workers or len(steps) or 1
         procs = []
-        for k, (name, cmd, timeout) in enumerate(steps):
-            print("== {} (parallel)".format(name), flush=True)
-            log = REPO / ".pytest_cache" / "prepush-gate-{}.log".format(k)
-            log.parent.mkdir(exist_ok=True)
-            fh = open(log, "w", encoding="utf-8", errors="replace")
-            procs.append([name, subprocess.Popen(cmd, cwd=REPO, stdout=fh, stderr=subprocess.STDOUT), fh, log,
-                          time.time() + timeout, None])
-        while any(p[5] is None for p in procs):
+        waiting = 0
+        while waiting < len(steps) or any(p[5] is None for p in procs):
+            while waiting < len(steps) and sum(p[5] is None for p in procs) < limit:
+                name, cmd, timeout, *env = steps[waiting]
+                print("== {} (parallel)".format(name), flush=True)
+                log = REPO / ".pytest_cache" / "prepush-gate-{}.log".format(waiting)
+                log.parent.mkdir(exist_ok=True)
+                fh = open(log, "w", encoding="utf-8", errors="replace")
+                procs.append([name, subprocess.Popen(cmd, cwd=REPO, env=env[0] if env else None, stdout=fh, stderr=subprocess.STDOUT), fh, log,
+                              time.time() + timeout, None])
+                waiting += 1
             for p in procs:
                 if p[5] is not None:
                     continue
@@ -261,6 +311,9 @@ def main(argv=None) -> int:
     spec = json.loads((REPO / ".github" / "ci-leg.json").read_text(encoding="utf-8"))
     floor = spec["collected_floor"] + spec["parts"]["mutations"]["collected_floor"]
     base = base_rev(a.base)
+    if base and not base_readable(base):
+        print("prepush-gate: cannot read the base revision {}".format(base))
+        return 2
     changed = changed_files(base)
     dirty = _git("status", "--porcelain", "--untracked-files=no")
     print("prepush-gate: {} @ {}  base {}  {} changed file(s){}".format(
@@ -307,14 +360,17 @@ def main(argv=None) -> int:
               ("rule messages", [f for f in files if f == "tests/test_rule_messages.py"], 1200)]
     rest = [f for f in files if f not in TIMING_SENTINELS
             and f not in ("tests/test_guard_corpus.py", "tests/test_rule_messages.py")]
-    # The changed-file set grows with the branch (177 changed files on a peer's branch timed this group out at 900 s
-    # on 2026-11-01: a time-budget refusal, not a test failure) and with reference selection. A big branch gets more
-    # processes, not a refusal: round-robin chunks, each under its own cap.
-    # 1200 like the corpus groups: a 19-file chunk of the 28-file housekeep merge was killed at 98% after 900 s
-    # (2026-11-01). The cap catches a hang; it must not refuse a merely large push.
-    groups += [("sentinels and changed-file tests {}/{}".format(k + 1, len(chunks)), chunk, 1200)
-               for chunks in [rest_chunks(rest)] for k, chunk in enumerate(chunks)]
-    g.parallel([(name + " ({} files)".format(len(fs)), verbose + fs, t) for name, fs, t in groups if fs])
+    # The changed-file set grows with the branch (177 files on a peer's branch; a shared-core re-pin selects most of the suite). One
+    # process per file, up to the policy's eight workers: fixed chunks had to guess each file's cost beforehand, and by file size one
+    # chunk drew the slow tests and reached 79% in 30 minutes, three pushes running, while the others idled from minute 8 (2026-11-03).
+    # The cap catches a hang in one file; it must not refuse a merely large push.
+    steps = [(name + " ({} files)".format(len(fs)), verbose + fs, cap) for name, fs, cap in groups if fs]
+    steps += [(name, verbose + [name], 1200) for name in rest]
+    g.parallel(steps, workers=8)
+    if not g.failed:
+        twins = twin_steps(py, base, changed)
+        if twins:
+            g.parallel(twins)
     total = time.time() - g.t0
     if g.failed:
         print("prepush-gate: FAILED ({}) in {:.0f}s -- fix before pushing; CI would have gone red on it".format(

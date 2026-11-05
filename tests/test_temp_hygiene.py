@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 
 from conftest import REPO
 
@@ -80,3 +81,20 @@ def test_every_temp_prefix_the_toolkit_creates_is_one_the_sweep_knows():
     missing = {k: v for k, v in created.items() if k not in hk.DEFAULTS["temp_prefixes"]}
     assert not missing, ("a leftover of these is never swept; add each to housekeep.DEFAULTS['temp_prefixes']:\n"
                          + "\n".join(f"  {k}  ({v})" for k, v in sorted(missing.items())))
+
+
+def test_house_carls_scratch_beside_the_masters_is_swept_like_temp(tmp_path):
+    """A failed check on another drive leaves its report in <root>/.housecarl-tmp; nothing used to look there."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("hk_scratch", REPO / "tools" / "housekeep.py")
+    hk = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = hk
+    spec.loader.exec_module(hk)
+    root, temp = tmp_path / "root", tmp_path / "temp"
+    left = root / ".housecarl-tmp" / "hc-xedit-abc"
+    other = root / ".housecarl-tmp" / "someone-elses"
+    left.mkdir(parents=True)
+    other.mkdir()
+    temp.mkdir()
+    got = [p for p, _ in hk.temp_candidates({"temp_prefixes": ["hc-xedit-"], "root": root}, temp)]
+    assert got == [left]

@@ -5,6 +5,7 @@ live build was still linking, on the rule's first, unreviewed run. These pin the
 """
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -217,8 +218,8 @@ class DailyRunGovernance(Fixture):
             with patch.dict(os.environ):             # conftest switches the session job off for every test
                 os.environ.pop("SKYGUARD_HOUSEKEEP_SWEEP", None)
                 h.session(self.cfg, state)
-            self.assertIn("1.50 GiB done", state.read_text(encoding="utf-8"))
-            h.session(self.cfg, state)                 # within the window: nothing runs a second time
+                self.assertIn("1.50 GiB done", state.read_text(encoding="utf-8"))
+                h.session(self.cfg, state)             # within the window: nothing runs a second time
         apply.assert_called_once()
 
     def test_the_deadline_defers_instead_of_running_long(self):
@@ -287,3 +288,21 @@ class NeverAskDeletePermanently(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(os.name == "nt", "process priority classes are Windows-only")
+class DailyRunPriority(unittest.TestCase):
+    def test_low_priority_really_lowers_this_process(self):
+        """Review round 2: the call failed silently, so the run the announcement calls low priority stayed normal. In a
+        child, so it never slows this suite."""
+        code = ("import sys, ctypes; sys.path.insert(0, sys.argv[1]); import housekeep_daily as d;"
+                "k = ctypes.WinDLL('kernel32'); k.GetCurrentProcess.restype = ctypes.c_void_p;"
+                "k.GetPriorityClass.argtypes = (ctypes.c_void_p,); me = k.GetCurrentProcess();"
+                "print(hex(k.GetPriorityClass(me))); d.low_priority(); print(hex(k.GetPriorityClass(me)))")
+        r = subprocess.run([sys.executable, "-B", "-c", code, str(REPO / "tools")], capture_output=True, text=True,
+                           timeout=120, creationflags=0x00000020)     # starts NORMAL: a runner's lower class would hide it
+        self.assertEqual(r.returncode, 0, r.stderr)
+        before, after = r.stdout.split()
+        if before != "0x20":                # a job object (the local resource runner) pins the class: nothing to measure
+            self.skipTest("COULD NOT CHECK: this runner pins the priority class at " + before)
+        self.assertEqual(after, "0x40", r.stdout)

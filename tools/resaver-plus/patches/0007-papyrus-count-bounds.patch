@@ -1,0 +1,145 @@
+diff --git a/src/core/Papyrus.cpp b/src/core/Papyrus.cpp
+index 8a52d45..0a42350 100644
+--- a/src/core/Papyrus.cpp
++++ b/src/core/Papyrus.cpp
+@@ -64,7 +64,20 @@ namespace ess
+ 			v.value = r.eid();
+ 			break;
+ 		case VType::kVariant:
+-			v.inner = std::make_unique<Variable>(Variable::read(r));
++			{
++				// A variant of a variant costs one byte, so a crafted save could nest until the stack ran out.
++				thread_local int depth = 0;
++				struct Level
++				{
++					int& d;
++					explicit Level(int& a_d) : d(a_d) { ++d; }
++					~Level() { --d; }
++				} level(depth);
++				if (depth > 16) {
++					throw FormatError("variant nested too deeply", r.pos());
++				}
++				v.inner = std::make_unique<Variable>(Variable::read(r));
++			}
+ 			break;
+ 		default:  // arrays
+ 			if (IsRefType(v.type)) {
+@@ -112,9 +125,17 @@ namespace ess
+ 
+ 	namespace
+ 	{
++		void CheckCount(const Reader& r, std::size_t count, std::size_t minimum, const char* what)
++		{
++			if (count > r.remaining() / minimum) {
++				throw FormatError(std::string(what) + " count cannot fit the remaining bytes", r.pos());
++			}
++		}
++
+ 		std::vector<Variable> ReadVars(Reader& r, std::uint32_t n)
+ 		{
+ 			std::vector<Variable> v;
++			CheckCount(r, n, r.le ? 3 : 5, "variable");
+ 			v.reserve(n);
+ 			for (std::uint32_t i = 0; i < n; ++i) {
+ 				v.push_back(Variable::read(r));
+@@ -250,6 +271,7 @@ namespace ess
+ 				f.locals.push_back(m);
+ 			}
+ 			const auto oc = r.u16();
++			CheckCount(r, oc, 1, "opcode");
+ 			f.code.reserve(oc);
+ 			for (std::uint16_t i = 0; i < oc; ++i) {
+ 				f.code.push_back(ReadOpcode(r));
+@@ -356,6 +378,7 @@ namespace ess
+ 			if (count > 100000) {
+ 				throw FormatError("invalid stack frame count", r.pos());
+ 			}
++			CheckCount(r, count, 32, "stack-frame");
+ 			d.frames.reserve(count);
+ 			for (std::uint32_t i = 0; i < count; ++i) {
+ 				d.frames.push_back(ReadFrame(r));
+@@ -414,6 +437,7 @@ namespace ess
+ 		{
+ 			std::vector<SuspendedStack> v;
+ 			const auto                  n = r.u32();
++			CheckCount(r, n, 5, "variable or suspended-stack");
+ 			v.reserve(n);
+ 			for (std::uint32_t i = 0; i < n; ++i) {
+ 				SuspendedStack s;
+@@ -476,18 +500,21 @@ namespace ess
+ 		} else {
+ 			strCount = r.u32();
+ 		}
++		CheckCount(r, strCount, 2, "strings");
+ 		strings.reserve(strCount);
+ 		for (std::uint32_t i = 0; i < strCount; ++i) {
+ 			strings.push_back(r.wstring());
+ 		}
+ 
+ 		const auto scriptCount = r.u32();
++		CheckCount(r, scriptCount, r.le ? 8 : 12, "scripts");
+ 		scripts.reserve(scriptCount);
+ 		for (std::uint32_t i = 0; i < scriptCount; ++i) {
+ 			Script s;
+ 			s.name = r.tstr();
+ 			s.parent = r.tstr();
+ 			const auto mc = r.u32();
++			CheckCount(r, mc, r.le ? 4 : 8, "s.members");
+ 			s.members.reserve(mc);
+ 			for (std::uint32_t m = 0; m < mc; ++m) {
+ 				MemberDesc d;
+@@ -499,6 +526,7 @@ namespace ess
+ 		}
+ 
+ 		const auto instCount = r.u32();
++		CheckCount(r, instCount, r.le ? 14 : 20, "instances");
+ 		instances.reserve(instCount);
+ 		for (std::uint32_t i = 0; i < instCount; ++i) {
+ 			ScriptInstance s;
+@@ -512,6 +540,7 @@ namespace ess
+ 		}
+ 
+ 		const auto refCount = r.u32();
++		CheckCount(r, refCount, r.le ? 6 : 12, "references");
+ 		references.reserve(refCount);
+ 		for (std::uint32_t i = 0; i < refCount; ++i) {
+ 			Reference x;
+@@ -521,6 +550,7 @@ namespace ess
+ 		}
+ 
+ 		const auto arrCount = r.u32();
++		CheckCount(r, arrCount, r.le ? 9 : 13, "arrays");
+ 		arrays.reserve(arrCount);
+ 		for (std::uint32_t i = 0; i < arrCount; ++i) {
+ 			ArrayInfo a;
+@@ -536,6 +566,7 @@ namespace ess
+ 		runtime = r.u32();
+ 
+ 		const auto activeCount = r.u32();
++		CheckCount(r, activeCount, 5, "activeScripts");
+ 		activeScripts.reserve(activeCount);
+ 		for (std::uint32_t i = 0; i < activeCount; ++i) {
+ 			ActiveScript a;
+@@ -615,6 +646,7 @@ namespace ess
+ 		}
+ 
+ 		const auto fmCount = r.u32();
++		CheckCount(r, fmCount, 2, "functionMessages");
+ 		functionMessages.reserve(fmCount);
+ 		for (std::uint32_t i = 0; i < fmCount; ++i) {
+ 			FunctionMessage m;
+@@ -637,12 +669,14 @@ namespace ess
+ 			unk2 = r.u32();
+ 		}
+ 		const auto unkCount = r.u32();
++		CheckCount(r, unkCount, r.le ? 4 : 8, "unknownIDs");
+ 		unknownIDs.reserve(unkCount);
+ 		for (std::uint32_t i = 0; i < unkCount; ++i) {
+ 			unknownIDs.push_back(r.eid());
+ 		}
+ 
+ 		const auto unbindCount = r.u32();
++		CheckCount(r, unbindCount, r.le ? 8 : 12, "unbinds");
+ 		unbinds.reserve(unbindCount);
+ 		for (std::uint32_t i = 0; i < unbindCount; ++i) {
+ 			QueuedUnbind u;

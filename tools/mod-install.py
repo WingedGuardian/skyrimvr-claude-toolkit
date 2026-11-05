@@ -72,6 +72,16 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import skyrim_paths  # noqa: E402
 
+
+def _declare_disposable(workspace):
+    """The producer's declaration housekeep's temp sweep requires, so a crash's leftover can be retired. Best effort:
+    without it the sweep only keeps the folder."""
+    try:
+        import housekeep_backups
+        housekeep_backups.mark_disposable_temp(workspace, HERE.parent)
+    except Exception:
+        pass
+
 _spec = importlib.util.spec_from_file_location("archive_triage", HERE / "archive-triage.py")
 triage = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(triage)
@@ -108,6 +118,25 @@ def name_problem(name: str) -> str:
     return ""
 
 
+KEPT_CONFIG_SUFFIXES = (".ini", ".toml", ".yaml", ".yml", ".cfg", ".json")
+# A mod's own data in a config's clothes: an old copy left behind goes on distributing or patching against the new plugin.
+MOD_DATA_CONFIG = re.compile(r"(?i)(_distr|_kid|_swap|_flm)\.ini$|(^|/)skypatcher/|(^|/)openanimationreplacer/(?!(?:.*/)?user\.json$)")
+
+
+def previous_install(manifest: Path) -> dict:
+    """{path: sha256} the last install of this mod wrote, from its record; empty when there is none."""
+    try:
+        rows = manifest.read_text(encoding="utf-8").splitlines()
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for row in rows:
+        sha256, _, path = row.partition("  ")
+        if path and re.fullmatch(r"[0-9a-f]{64}", sha256):
+            out[path] = sha256
+    return out
+
+
 def records_dir() -> Path:
     override = os.environ.get("SKYRIM_MANUAL_INSTALLS")
     return Path(override) if override else skyrim_paths.TOOLKIT_ROOT / ".claude" / "backups" / "manual-installs"
@@ -117,9 +146,13 @@ def mo2_mods() -> str:
     """SKYRIM_MO2_MODS from the environment or skyrim-paths.env ("" when not configured)."""
     from skyguard import paths as sg_paths
     try:
-        return sg_paths.read_install(str(skyrim_paths.TOOLKIT_ROOT), os.environ).first("SKYRIM_MO2_MODS")
+        config = sg_paths.read_install(str(skyrim_paths.TOOLKIT_ROOT), os.environ)
     except (OSError, ValueError):
         return ""
+    if any(key == "SKYRIM_MO2_MODS" for _file, key in config.malformed):
+        # Not "no MO2": falling back would install into the game's Data folder instead of a mod folder.
+        raise SystemExit("ERROR: SKYRIM_MO2_MODS in skyrim-paths.env is not a usable absolute path. Fix it, then run this again.")
+    return config.first("SKYRIM_MO2_MODS")
 
 
 def write_replacing(src: Path, target: Path) -> None:
@@ -395,9 +428,8 @@ def recycle(paths):
 # (Nexus id, version, notes), which lives in the mod folder and is in no archive.
 CARRY_OVER = ("meta.ini",)
 
-# Said BEFORE anything goes to the bin, so Windows' own "too big for the Recycle Bin" prompt is never a surprise.
-BIN_NOTICE = ("Moving {} to the Recycle Bin; if Windows says it is too big for the bin, it will ask you before "
-              "deleting it permanently -- answer No to keep it.")
+# Said BEFORE anything goes to the bin. An item too big for it stays in place and is reported, with no prompt.
+BIN_NOTICE = "Moving {} to the Recycle Bin; if it is too big for the bin it stays where it is."
 
 
 def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
@@ -423,6 +455,7 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
             atomic_record(operation_manifest, text)
         atomic_record(manifest, text)
     stage = Path(tempfile.mkdtemp(prefix="modinst_"))           # the tool's own temp; removed below
+    _declare_disposable(stage)
     try:
         # Names go through a list file, never argv: a large archive overflows Windows' 32K command line.
         # -spd: names are literal, not wildcards; -scsUTF-8: the list file's encoding.
@@ -457,6 +490,11 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
         old_folder = backup / "mod-folder" / data.name if replacing is not None else None
         if old_folder is not None:
             header.append("# UPDATE: the previous mod folder {} is kept whole at {}".format(replacing, old_folder))
+        shipped_before = previous_install(manifest) if old_folder is not None else {}   # before this run's record replaces it
+        # The mod's own data as the last install wrote it goes on patching against the new plugin if it stays: replace it.
+        todo = [(inner, dest, "OVERWRITE", []) if (action == "CONFIG-NEW" and MOD_DATA_CONFIG.search(inner.replace("\\", "/"))
+                                                   and shipped_before.get(str(dest)) == sha(dest)) else (inner, dest, action, notes)
+                for inner, dest, action, notes in todo]
         planned = ["PLANNED  {}".format(target_of(p)) for p in todo]
         record(header + ["# STATUS: in progress"] + planned, initial=True)
 
@@ -478,13 +516,33 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
             if old_folder is not None:
                 replacing.mkdir(parents=True, exist_ok=True)
                 # The user's configs stay (the archive's copy goes beside them as .new), and so does MO2's meta.ini.
-                keep = [q[1] for q in todo if q[2] == "CONFIG-NEW"]
+                # A config the archive does not hold stays too: the mod or the user made it, and an update must not
+                # return the mod to its defaults. A game-root config (--game-root-files) never left its folder.
+                keep = [q[1] for q in todo if q[2] == "CONFIG-NEW" and replacing in q[1].parents]
                 keep += [replacing / n for n in CARRY_OVER if not any(q[1] == replacing / n for q in todo)]
-                for dest in keep:
+                planned_here = {q[1] for q in todo}
+                extra = [replacing / f.relative_to(old_folder) for f in old_folder.rglob("*")
+                         if f.is_file() and f.suffix.lower() in KEPT_CONFIG_SUFFIXES
+                         and f.relative_to(old_folder).as_posix() not in CARRY_OVER
+                         and not MOD_DATA_CONFIG.search(f.relative_to(old_folder).as_posix())
+                         and replacing / f.relative_to(old_folder) not in planned_here
+                         and shipped_before.get(str(replacing / f.relative_to(old_folder))) != sha(f)]
+                for f in old_folder.rglob("*"):
+                    rel = f.relative_to(old_folder).as_posix()
+                    if (f.is_file() and f.suffix.lower() in KEPT_CONFIG_SUFFIXES and MOD_DATA_CONFIG.search(rel)
+                            and replacing / rel not in planned_here
+                            and shipped_before.get(str(replacing / rel)) != sha(f)):
+                        print("  NOT KEPT {} (the mod's own data, not in the new archive; if you edited it, your copy is in "
+                              "the backup)".format(triage.clean(str(replacing / rel))))
+                for dest in keep + extra:
                     src_old = old_folder / dest.relative_to(replacing)
                     if src_old.is_file():
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(str(src_old), str(dest))
+                for dest in extra:
+                    print("  KEPT {} (not in the new archive, and not as the last install wrote it, so it may be yours; delete "
+                          "it if it is an old file of the mod)".format(triage.clean(str(dest))))
+                    header += ["# KEPT: {}  {}".format(sha(dest), dest)]
 
             bad = 0
             for done, p in enumerate(todo, 1):

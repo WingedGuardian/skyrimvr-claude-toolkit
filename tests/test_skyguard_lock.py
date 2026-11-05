@@ -58,6 +58,7 @@ class Bed:
 
 def _icacls(p):
     r = subprocess.run([str(SYS32 / "icacls.exe"), str(p)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr             # `"DENY" not in` a failed call's output would pass on nothing
     return r.stdout
 
 
@@ -840,6 +841,14 @@ def test_cli_dispatches_guards_and_doctor(tmp_path, capsys):
     assert cli.main(["guards"]) == 2
     assert cli.main(["nonsense"]) == 2
     assert cli.main([]) == 2
+    # Review round 2: this test's name said doctor and it never called it; an early return passed everything.
+    capsys.readouterr()
+    assert cli.main(["doctor", "--root", str(tmp_path)]) == 2             # no install there: said, not "healthy"
+    said = capsys.readouterr()
+    assert "no installed hooks" in said.out + said.err
+    assert cli.main(["doctor", "--root=" + str(tmp_path)]) == 2           # this spelling is not overridden by the default
+    said = capsys.readouterr()
+    assert str(tmp_path) in said.out + said.err
 
 
 def test_default_is_off_until_the_batch_decides(bed):
@@ -848,6 +857,8 @@ def test_default_is_off_until_the_batch_decides(bed):
     # Off Windows the lock does not exist, and status says so rather than "default off" (Linux CI run 38187755448).
     if not WINDOWS:
         assert "unsupported on this platform" in said, said
+    else:
+        assert "off" in said, said
 
 
 def _sh_with_python(bed, tmp_path, value):

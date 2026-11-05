@@ -73,6 +73,8 @@ def _hb_dir(root):
 
 def _hb(root, stage, inv, detail=""):
     """Best-effort heartbeat; never decides anything."""
+    if not root:
+        return
     try:
         d = _hb_dir(root)
         os.makedirs(d, exist_ok=True)

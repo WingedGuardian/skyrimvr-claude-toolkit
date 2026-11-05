@@ -3,7 +3,7 @@
 This folder holds a patch set for **ReSaver++** ("ReSaver Plus"), which `build.py` applies to the
 upstream source it fetches. It ships **no upstream source and no binary**.
 
-## Upstream NOTICE (Tonycubed2/ResaverPP, `NOTICE.md` at commit `0d48f60cb8a69b367abfbd78d58418e64c507da5`)
+## Upstream NOTICE (Tonycubed2/ResaverPP, `NOTICE.md` at commit `098eb8c1c3a23552c7662a2083f4aca9a2ff41f4`)
 
 > # ReSaver++
 >
@@ -41,35 +41,31 @@ section is the prominent notice for every one of them.
 
 | Upstream file changed | By patch |
 |---|---|
-| `CMakeLists.txt` | 0005, 0007, 0010, 0017, 0018, 0019, 0020 |
-| `src/cli/main.cpp` | 0009, 0017 |
-| `src/core/ChangeFormData.cpp` | 0002, 0003, 0004, 0008, 0018 |
-| `src/core/ChangeFormData.h` | 0008 |
-| `src/core/Ops.cpp` | 0015, 0020 |
-| `src/core/Ops.h` | 0015, 0020 |
-| `src/core/Papyrus.cpp` | 0013 |
-| `src/core/Save.cpp` | 0006, 0012, 0014, 0016 |
-| `src/core/Save.h` | 0006, 0012, 0014, 0016 |
-| `src/gui/Platform.cpp` | 0001 |
+| `CMakeLists.txt` | 0001 |
+| `src/cli/main.cpp` | 0002 |
+| `src/core/ChangeFormData.cpp` | 0003 |
+| `src/core/ChangeFormData.h` | 0004 |
+| `src/core/Ops.cpp` | 0005 |
+| `src/core/Ops.h` | 0006 |
+| `src/core/Papyrus.cpp` | 0007 |
+| `src/core/Save.cpp` | 0008 |
+| `src/core/Save.h` | 0009 |
+| `tests/unit_test.cpp` | 0010 |
 
 What the patches change:
 
 | Patch | Change |
 |---|---|
-| 0001 | `#include <shellapi.h>` in the GUI platform file (an MSVC build fix; GUI only) |
-| 0002, 0003, 0004, 0018 | Decoder corrections: extra-data type 16, FollowerSwimBreadcrumbs (135), QUST instances / run-data 0, counted SayToTopicInfo (113) |
-| 0006 | Full expected-result verification (header, body, globals, Papyrus, co-save) before a written save is published |
-| 0008 | Per-decode diagnostics in ChangeFormData |
-| 0009, 0017 | Structured JSON command-line entry; UTF-8 wide-argument dispatch and its shell32 link |
-| 0012 | In-memory parser entry (verify-roundtrip writes no temporary file) |
-| 0013 | Papyrus counts are bounds-checked before allocation |
-| 0014 | Co-save presence tracking |
-| 0015 | Batched reverse-reference lookup |
-| 0016 | Optional write-stage observer used by the fault probes |
-| 0020 | Combined advisory analysis |
-| 0005, 0007, 0010, 0018, 0019 | CTest and probe targets |
+| 0001 | CTest and probe targets; shell32 link for the command-line tool's UTF-8 arguments |
+| 0002 | Structured JSON command-line entry; UTF-8 wide-argument dispatch |
+| 0003 | Decoder corrections: extra-data type 16, relabelled SayToTopicInfo (113) fields; a limit of 16 on extra-data nesting; per-decode diagnostics |
+| 0004 | Per-decode diagnostics |
+| 0005, 0006 | Batched reverse-reference lookup; combined advisory analysis |
+| 0007 | Papyrus counts are bounds-checked before allocation, with the widths of the save's own game edition |
+| 0008, 0009 | Full expected-result verification (header, body, globals, Papyrus, co-save) before a written save is published; in-memory parser entry (verify-roundtrip writes no temporary file); co-save presence tracking; optional write-stage observer used by the fault probes |
+| 0010 | A unit test no longer reads a quest through a snapshot that has already been destroyed |
 
-The 15 files under `additions/` (7 source, 8 test) are first-party work of the Skyrim AI Assistant Toolkit project,
+The 16 files under `additions/` (7 source, 9 test) are first-party work of the Skyrim AI Assistant Toolkit project,
 licensed under the Apache License 2.0 like the files they extend. The patches themselves are also licensed under the
 Apache License 2.0. The rest of the toolkit is MIT (the repository's top-level `LICENSE`); MIT does not cover this
 folder.

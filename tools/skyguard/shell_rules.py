@@ -72,7 +72,15 @@ def _is_resaver(e) -> bool:
     # v4.0.0: the native backend's adapter run directly (`python tools/resaver_native.py clean x.ess y.ess --apply`)
     # takes the wrapper's arguments, so it is judged exactly as the wrapper is.
     if RESAVER_PYTHON.fullmatch(e.program):
-        script = next((a for a in e.argv if not a.startswith("-")), "")        # past `-B`, `-3`, `-I`
+        script, k = "", 0
+        while k < len(e.argv):                                                 # past `-B`, `-3`, `-I`, and `-X utf8`
+            if e.argv[k] in ("-X", "-W", "--check-hash-based-pycs"):
+                k += 2
+            elif e.argv[k].startswith("-"):
+                k += 1
+            else:
+                script = e.argv[k]
+                break
         if _base_name(script).startswith(RESAVER_ADAPTER):
             return True
     return e.program == "java" and any("resaver" in a.lower() for a in e.argv)
@@ -271,6 +279,13 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     store_hit = self_rules.shell_save_store_hit(command, parsed, roots, cwd, env)
     if store_hit:
         return deny("S-SAVE-STORE", store_hit)
+    # User ruling 2026-10-31: only the user turns save locking off; the switch is never an agent's to change.
+    lock_hit = self_rules.shell_save_lock_hit(command, parsed, roots, cwd, env)
+    if lock_hit:
+        return deny("S-SAVE-LOCK", os.path.basename(lock_hit.rstrip("/")) or lock_hit)
+    lock_command = lift_rules.save_lock_change(parsed)
+    if lock_command:
+        return deny("S-SAVE-LOCK", lock_command)
     # User ruling 2026-10-20: an agent session transcript (where save approvals are read) is never an agent's to change.
     spoken = self_rules.shell_transcript_hit(command, parsed, cwd, env, transcript)
     if spoken:

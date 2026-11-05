@@ -108,6 +108,12 @@ def install_kind(rel: List[str]) -> str:
         return GUARD
     if rel[:3] == [".claude", "backups", ".hook-heartbeat"] or rel == [".claude", "backups", "audit_log.txt"]:
         return GUARD
+    # What the save sentinel compares with and what `save-lock off` relies on: a reset baseline hides every change.
+    if rel in ([".claude", "backups", ".save-sentinel.json"], [".claude", "backups", ".save-sentinel.json.seen"],
+               [".modding-agent-harness", "save-lock-folders.json"], [".modding-agent-harness", "save-lock-exempt.json"]):
+        return GUARD
+    if rel in (["tools", "session-charter.sh"], ["tools", "kb-guard.sh"]):   # registered hooks, outside .claude/hooks
+        return GUARD
     return ""
 
 
@@ -182,10 +188,26 @@ def save_store_target(abs_path, roots, holder=False, cache=None):
             or holder and (not rel or rel in _SAVE_HOLDERS))
 
 
-def shell_save_store_hit(command, parsed, roots, cwd="", env=None):
+SAVE_LOCK_SWITCH = [".modding-agent-harness", "save-lock.json"]
+
+
+def save_lock_target(abs_path, roots, holder=False, cache=None):
+    """The optional save-lock switch (user ruling 2026-10-31: only the user turns locking off). Its folder is a
+    save-store holder already, so moving or deleting that is S-SAVE-STORE's."""
+    rel = _rel(abs_path, roots.install_dirs) if roots is not None and abs_path else None
+    return rel is not None and [p.lower() for p in rel] == SAVE_LOCK_SWITCH
+
+
+def shell_save_lock_hit(command, parsed, roots, cwd="", env=None):
+    """A recognized write, move or delete of the save-lock switch."""
+    return shell_save_store_hit(command, parsed, roots, cwd, env, target=save_lock_target)
+
+
+def shell_save_store_hit(command, parsed, roots, cwd="", env=None, target=None):
     """Recognized store mutations, including an ancestor moved/deleted or aliased."""
     from . import deletes
     env = os.environ if env is None else env
+    target = target or save_store_target
     cache = _StoreCache()
     for e in parsed.execs:
         e = deletes.substituted(e)
@@ -193,7 +215,7 @@ def shell_save_store_hit(command, parsed, roots, cwd="", env=None):
         candidates += [(w, True) for w in (deletes.operands(e) or []) if isinstance(w, str)]
         for word, holder in candidates:
             placed = resolve_own(lambda x: targets.resolve_operand(e, x, cwd, env), word)
-            if placed and save_store_target(placed, roots, holder, cache):
+            if placed and target(placed, roots, holder, cache):
                 return placed
     for word, how in deletes.recycle_targets(deletes.recycle_text(command, parsed)):
         # A concatenation hole can look like an empty quoted argument. It is
@@ -201,7 +223,7 @@ def shell_save_store_hit(command, parsed, roots, cwd="", env=None):
         if not word.strip():
             continue
         placed = _recycle_abs(word, how, targets.normalise_cwd(cwd), env)
-        if placed and save_store_target(placed, roots, True, cache):
+        if placed and target(placed, roots, True, cache):
             return placed
     return ""
 
@@ -377,9 +399,13 @@ def _routes(e) -> List[Tuple[str, bool, str]]:
     elif p == "cp" and _cp_links(argv):
         rec = any(_short(w, "aRr") or w in ("--recursive", "--archive") for w in argv)
         out += [(s, rec, LINKS) for _, srcs in writes.copy_targets(e) for s in srcs]     # r2 N2: cp -l / -s
-    elif p in ("chmod", "chown", "chgrp"):
-        words = [w for w in argv if not w.startswith("-") and not w.startswith("--reference")]
-        out += [(w, False) for w in words[1:]]
+    elif p == "chmod":
+        # A symbolic mode may start with a dash (`chmod -r f`), so only chmod's own letters are options here.
+        words = [w for w in argv if not w.startswith("--") and not re.fullmatch(r"-[Rcfv]+", w)]
+        out += [(w, False) for w in (words if any(w.startswith("--reference") for w in argv) else words[1:])]
+    elif p in ("chown", "chgrp"):
+        words = [w for w in argv if not w.startswith("-")]
+        out += [(w, False) for w in (words if any(w.startswith("--reference") for w in argv) else words[1:])]
     elif p == "icacls" and argv and not argv[0].startswith("/"):
         if any(w.lower().startswith(_ICACLS_WRITE) for w in argv[1:]):
             out.append((argv[0], False))

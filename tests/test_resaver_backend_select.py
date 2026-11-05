@@ -34,7 +34,7 @@ def kit(tmp_path):
     build.mkdir()
     (build / "resaverpp-cli.exe").write_text(STUB, encoding="utf-8")
     sha = hashlib.sha256((build / "resaverpp-cli.exe").read_bytes()).hexdigest()
-    (build / "BUILD-INFO.json").write_text(json.dumps({"upstream_commit": "0d48f60cb8a69b367abfbd78d58418e64c507da5",
+    (build / "BUILD-INFO.json").write_text(json.dumps({"upstream_commit": "098eb8c1c3a23552c7662a2083f4aca9a2ff41f4",
                                                        "executable": "resaverpp-cli.exe", "sha256": sha}),
                                            encoding="utf-8")
     save = tmp_path / "Synthetic.ess"

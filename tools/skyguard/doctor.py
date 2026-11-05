@@ -21,9 +21,9 @@ Exit: 1 when any counted line is `not live`; else 2 when any is `unknown`; else 
 unproven line, as in health.report.
 
 It WRITES NOTHING, with one exception (R9): a lift past its expiry (or the 8-hour cap) is removed from
-.skyguard/state.json through state.write, a line is appended to .claude/backups/AUDIT_LOG.txt, and the report says so.
-A state file that does not verify is never rewritten. Nothing is relocked here: the next session start, or
-`bash tools/skyguard.sh lock lock`, does that. (health.report is not reused whole for the same reason: it probes the telemetry
+.skyguard/state.json through state.write, a line is appended to .claude/backups/AUDIT_LOG.txt, the files that lift
+covered are locked again (lock.relock_expired), and the report says so. A state file that does not verify is never
+rewritten. (health.report is not reused whole for the same reason: it probes the telemetry
 folder by writing a file into it.)
 """
 from __future__ import annotations
@@ -435,7 +435,10 @@ def _layer3_codex(root, codex_config):
         rep = {"overall": "unknown", "error": "the trust reader failed (%s)" % e.__class__.__name__}
     overall = rep.get("overall")
     if overall == "trusted":
-        rows.append(Row(S, "trust", LIVE, "every toolkit hook is approved in Codex's config.toml at its current hash"))
+        untrusted = rep.get("project_trust") == "untrusted"
+        rows.append(Row(S, "trust", UNKNOWN if untrusted else LIVE, "every toolkit hook is approved in Codex's config.toml at its current hash"
+                        + ("; this folder is not marked trusted there, and whether Codex then loads its hooks is not "
+                           "measured: accept the trust prompt when you open Codex here" if untrusted else "")))
     elif overall == "unknown":
         rows.append(Row(S, "trust", UNKNOWN, "cannot tell: %s" % _txt(rep.get("error") or "see "
                         "tools/skyguard/codex_trust.py report", 140)))

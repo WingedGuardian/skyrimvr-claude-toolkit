@@ -73,20 +73,22 @@ bool Noise(std::string p) {
 struct Field {
   std::string display;
   std::vector<std::uint8_t> raw;
+  bool isRef = false;
 };
-void Flatten(const cf::Node &n, const std::vector<std::uint8_t> &b,
+void Flatten(const SaveFile &s, const cf::Node &n, const std::vector<std::uint8_t> &b,
              const std::string &prefix, std::map<std::string, Field> &out) {
   const auto path = prefix + "/" + n.label;
   if (n.kids.empty()) {
     Field f;
-    f.display = n.isRef ? Hex(n.refRaw) : n.value;
+    f.isRef = n.isRef;
+    f.display = n.isRef ? Ref(s, RefID{n.refRaw}) : n.value;
     if (n.offset <= b.size() && n.size <= b.size() - n.offset)
       f.raw = {b.begin() + n.offset, b.begin() + n.offset + n.size};
     out[path] = std::move(f);
     return;
   }
   for (const auto &k : n.kids)
-    Flatten(k, b, path, out);
+    Flatten(s, k, b, path, out);
 }
 std::map<std::string, std::int64_t> Inventory(const SaveFile &s,
                                               const cf::Decoded &d) {
@@ -187,9 +189,9 @@ J One(const SaveFile &a, const ChangeForm &fa, const SaveFile &b,
   }
   std::map<std::string, Field> ma, mb;
   for (const auto &n : da.root.kids)
-    Flatten(n, x, "", ma);
+    Flatten(a, n, x, "", ma);
   for (const auto &n : db.root.kids)
-    Flatten(n, y, "", mb);
+    Flatten(b, n, y, "", mb);
   std::set<std::string> keys;
   for (const auto &v : ma)
     keys.insert(v.first);
@@ -200,8 +202,9 @@ J One(const SaveFile &a, const ChangeForm &fa, const SaveFile &b,
   std::size_t total = 0, signal = 0;
   for (const auto &key : keys) {
     auto va = ma.find(key), vb = mb.find(key);
-    if (va != ma.end() && vb != mb.end() && va->second.raw == vb->second.raw &&
-        va->second.display == vb->second.display)
+    // Two references are the same when they name the same form, whatever each save's table index is.
+    if (va != ma.end() && vb != mb.end() && va->second.display == vb->second.display &&
+        ((va->second.isRef && vb->second.isRef) || va->second.raw == vb->second.raw))
       continue;
     ++total;
     const bool noise = Noise(key);
@@ -230,8 +233,9 @@ const ChangeForm *Pick(const SaveFile &s, const std::string &q) {
   if (used != q.size() || id > 0xFFFFFFFFu)
     throw std::runtime_error("invalid form id");
   const ChangeForm *found = nullptr;
+  const bool exact = (id >> 24) != 0;
   for (const auto &f : s.changeForms)
-    if ((s.formIDOf(f.refID) & 0xFFFFFF) == (id & 0xFFFFFF)) {
+    if (exact ? s.formIDOf(f.refID) == id : (s.formIDOf(f.refID) & 0xFFFFFF) == (id & 0xFFFFFF)) {
       if (!found)
         found = &f;
       if (f.typeCode() == static_cast<unsigned>(ChangeFormType::ACHR))
@@ -246,20 +250,41 @@ json::Value ChangeDifferences(const SaveFile &before, const SaveFile &after,
   if (args.has("--quests")) {
     j.o["mode"] = S("quests");
     j.o["changed"] = Arr();
+    j.o["added"] = Arr();
+    j.o["removed"] = Arr();
+    // Paired by the form each names: a RefID is an index into its own save's table.
+    const auto key = [](const SaveFile &s, const ChangeForm &f) {
+      const auto full = s.formIDOf(f.refID);
+      return full ? static_cast<std::uint32_t>(full) : f.refID.data;
+    };
     std::map<std::uint32_t, const ChangeForm *> quests;
     for (const auto &f : after.changeForms) {
       if (f.typeCode() == static_cast<unsigned>(ChangeFormType::QUST) &&
-          !quests.emplace(f.refID.data, &f).second)
+          !quests.emplace(key(after, f), &f).second)
         throw std::runtime_error("ambiguous duplicate quest changeform");
     }
     for (const auto &f : before.changeForms)
       if (f.typeCode() == static_cast<unsigned>(ChangeFormType::QUST)) {
-        const auto found = quests.find(f.refID.data);
+        const auto found = quests.find(key(before, f));
         const auto *match = found == quests.end() ? nullptr : found->second;
         if (match && (f.changeFlags != match->changeFlags ||
-                      cf::Body(f) != cf::Body(*match)))
-          j.o["changed"].a.push_back(One(before, f, after, *match));
+                      cf::Body(f) != cf::Body(*match))) {
+          // Raw bytes can differ only because a reference's table index moved; that same form is no change.
+          auto one = One(before, f, after, *match);
+          if (f.changeFlags != match->changeFlags || !one.o["completeA"].b || !one.o["completeB"].b ||
+              one.o["structured"].o["changedCount"].n != 0)
+            j.o["changed"].a.push_back(std::move(one));
+        }
+        if (!match)
+          j.o["removed"].a.push_back(S(Hex(key(before, f), 8)));
       }
+    for (const auto &entry : quests) {
+      bool had = false;
+      for (const auto &f : before.changeForms)
+        had = had || (f.typeCode() == static_cast<unsigned>(ChangeFormType::QUST) && key(before, f) == entry.first);
+      if (!had)
+        j.o["added"].a.push_back(S(Hex(entry.first, 8)));
+    }
     j.o["changedCount"] = N(j.o["changed"].a.size());
   } else {
     const auto id =
@@ -268,8 +293,12 @@ json::Value ChangeDifferences(const SaveFile &before, const SaveFile &after,
     auto *b = Pick(after, id);
     j.o["mode"] = S("single");
     j.o["refid"] = S(id);
-    j.o["found"] = B(a && b);
-    if (a && b)
+    // The low bytes can name different forms in the two saves: two unrelated forms are no difference to report.
+    const bool same = a && b && before.formIDOf(a->refID) == after.formIDOf(b->refID);
+    j.o["found"] = B(same);
+    if (a && b && !same)
+      j.o["reason"] = S("the two saves hold different forms under these low bytes; give the full id");
+    if (same)
       j.o["diff"] = One(before, *a, after, *b);
   }
   return j;

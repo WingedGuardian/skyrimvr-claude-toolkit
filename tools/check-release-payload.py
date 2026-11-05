@@ -23,6 +23,7 @@ Sections (all run by default; --section picks some, for tests and for a tree tha
            file; .agents skills mirror .claude skills; AGENTS.md within the size Codex reads untruncated
   adapter  the adapter kit (ADAPTING.md, tools/adapting/, the files it cites)
   guards   every guard file hashes to what the payload's own GUARD-FILES.sha256 says (Plan 6 R12)
+  shared-core  the pinned bytes and inventory of tools/modding_harness/
 
 --leaks greps files for the home folder of whoever runs it, in every spelling (C:/Users/<name>,
 C:\\Users\\<name>, /c/Users/<name>, JSON-escaped, /home/<name>, UTF-8 and UTF-16), and for the bare user name
@@ -45,9 +46,9 @@ from pathlib import Path
 
 # ------------------------------------------------------------------ the hook floor (recounted 2026-10-05)
 # .claude/hooks: backup-before-edit, protect-bash, protect-files, protect-mcp, session-kb-guard,
-# snapshot-before-tool. .codex/hooks: skyguard-entry.sh, skyguard-entry.ps1. tests/test_release_payload.py
+# snapshot-before-tool, save-sentinel (2026-10-30). .codex/hooks: skyguard-entry.sh, skyguard-entry.ps1. tests/test_release_payload.py
 # asserts both numbers against the tree, so a hook added or dropped makes this file change too.
-CLAUDE_HOOK_FLOOR = 6
+CLAUDE_HOOK_FLOOR = 7
 CODEX_ENTRY_FLOOR = 2
 HOOK_FLOOR = CLAUDE_HOOK_FLOOR + CODEX_ENTRY_FLOOR
 
@@ -65,6 +66,10 @@ CORE_REQUIRED = (
     "AGENTS.md",
     "tools/hook-canary.sh",
     "tools/kb-guard.sh",
+    "tools/session-charter.sh",
+    "tools/modding_harness/charter.py",
+    "tools/modding_harness/ledger.py",
+    "tools/modding_harness/find_session.py",
     "tools/skyguard/run.py",
     "scripts/gen_agent_trees.py",
     # Plan 6: what README tells a user to run for the lock, lifts, snapshots and skydoctor, and the guard manifest
@@ -171,8 +176,8 @@ DOTENV_GLOBS = (".env", "*.env", ".env.*", "*.env.local")
 # an upstream contribution anywhere, no qualification checker of the dev install, and exactly the tested patch set.
 RESAVER_PLUS = "tools/resaver-plus"
 RESAVER_BINARY_SUFFIXES = (".exe", ".dll", ".pdb", ".lib", ".obj", ".ilk", ".exp")
-RESAVER_PLUS_PATCHES = 27
-RESAVER_PLUS_ADDITIONS = 15
+RESAVER_PLUS_PATCHES = 10
+RESAVER_PLUS_ADDITIONS = 16
 
 ADAPTER_REQUIRED = (
     "ADAPTING.md",
@@ -275,8 +280,11 @@ def check_hooks(root: Path):
         cmds = [h.get("command", "") for ms in cfg.get("hooks", {}).values() for m in ms for h in m.get("hooks", [])]
         named = sorted({p for c in cmds for p in re.findall(r"\$CLAUDE_PROJECT_DIR/([^\"' ]+)", c)})
         missing = [p for p in named if not (root / p).is_file()]
+        # Only guard wrappers count toward the floor: an advisory entry outside .claude/hooks/ (tools/session-charter.sh)
+        # must not stand in for a guard whose registration was dropped.
+        guards = [p for p in named if p.startswith(".claude/hooks/")]
         problem = ("missing: " + ", ".join(missing)) if missing else (
-            None if len(named) >= CLAUDE_HOOK_FLOOR else "only {} hook(s) registered".format(len(named)))
+            None if len(guards) >= CLAUDE_HOOK_FLOOR else "only {} guard hook(s) registered".format(len(guards)))
     except (OSError, ValueError, AttributeError, TypeError) as e:
         problem = "unreadable: {}".format(e)
     yield ".claude/settings.json registers the hooks, and each is shipped", problem

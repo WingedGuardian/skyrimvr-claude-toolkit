@@ -175,7 +175,7 @@ def test_every_value_is_idempotent(game_dir, value):
 def test_auto_configures_the_agents_found_on_path(game_dir, tmp_path, hide, stubs, expected):
     stubdir = stub_bin(tmp_path, **{s: "echo stub" for s in stubs})
     r = run_setup(game_dir, shim_path=True, env_overrides={
-        "PATH": path_with(stubdir, BIN), "FAKE_WHICH_MISSING": hide})
+        "PATH": path_with(stubdir, BIN), "FAKE_WHICH_MISSING": (hide + " opencode").strip()})   # a real install must not count
     assert r.returncode == 0, r.stdout[-1500:] + r.stderr[-1500:]
     assert "-> configuring: %s (--agent auto)" % expected in r.stdout, r.stdout[:800]
     assert configured(game_dir, "CLAUDE.md") is (expected in ("claude", "all"))
@@ -201,7 +201,7 @@ def test_a_later_run_for_the_other_agent_keeps_the_first(game_dir):
 
 @pytest.mark.parametrize("value", ["claude", pytest.param("codex", marks=windows_only)])
 def test_an_unselected_agent_leaves_no_guard_drift(game_dir, value):
-    """The session-start drift check compares the interpreter across all eight guard files: one left at its
+    """The session-start drift check compares the interpreter across all nine guard files: one left at its
     placeholder by a one-agent run would read as an edited guard file at every session start."""
     sys.path.insert(0, str(REPO / "tools"))
     from skyguard import session
@@ -490,7 +490,7 @@ def test_a_failed_migration_is_said_and_setup_carries_on(game_dir):
     """Exit 1 from migrate-3x (a copy or write failed): loud, never fatal to the rest of setup."""
     (game_dir / "tools" / "migrate-3x.py").write_text("import sys\nprint('boom')\nsys.exit(1)\n", encoding="utf-8")
     r = run_setup(game_dir)
-    assert r.returncode == 0
+    assert r.returncode == 1 and "Setup INCOMPLETE" in r.stdout, "the rest ran, but the upgrade did not do what it says"
     assert "The 3.x migration reported a problem (exit 1" in r.stdout and configured(game_dir, "CLAUDE.md")
 
 

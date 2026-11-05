@@ -65,4 +65,4 @@ def test_real_inline_plugin_write_is_still_selected_and_rejected():
 
 def test_real_unknown_inline_syntax_still_refuses():
     with pytest.raises(ValueError, match='Python literal write scope could not be parsed'):
-        writes.text_write_targets(source("python -c 'not Python source !'"), python_literals=True)
+        writes.text_write_targets(source("python -c 'not Python source !; open(p, m)'"), python_literals=True)

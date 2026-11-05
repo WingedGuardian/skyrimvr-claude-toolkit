@@ -132,6 +132,9 @@ Variable Build(Papyrus &p, const Variable &old, const std::string &value,
     c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   VType t = old.type;
   if (!type.empty()) {
+    if (old.type != VType::kNull && old.type != VType::kString && old.type != VType::kInt &&
+        old.type != VType::kFloat && old.type != VType::kBool)
+      throw std::runtime_error("refusing to overwrite a reference or array variable with a primitive");
     if (type == "bool")
       t = VType::kBool;
     else if (type == "int")
@@ -147,7 +150,9 @@ Variable Build(Papyrus &p, const Variable &old, const std::string &value,
   v.type = t;
   if (t == VType::kInt) {
     std::size_t n = 0;
-    auto i = std::stoll(value, &n, 0);
+    // Base 10 unless spelled 0x: base 0 read a zero-padded 010 as octal 8, silently.
+    const auto hex = value.rfind("0x", 0) == 0 || value.rfind("0X", 0) == 0;
+    auto i = std::stoll(value, &n, hex ? 16 : 10);
     if (n != value.size() || i < std::numeric_limits<std::int32_t>::min() ||
         i > std::numeric_limits<std::int32_t>::max())
       throw std::runtime_error("integer outside signed 32-bit range");
@@ -193,6 +198,8 @@ GlobalTarget Global(SaveFile &s, const std::string &target) {
       colon == std::string::npos ? target : target.substr(colon + 1), 16);
   if (fid > 0xFFFFFFFFu)
     throw std::runtime_error("form id exceeds 32 bits");
+  // A bare id with a load-order byte names that form; only a bare low id, or plugin:id, matches by the low 24 bits.
+  const bool exact = plugin.empty() && (fid >> 24) != 0;
   GlobalTarget found;
   std::size_t matches = 0;
   for (auto *table : {&s.table1, &s.table2, &s.table3})
@@ -213,7 +220,7 @@ GlobalTarget Global(SaveFile &s, const std::string &target) {
           auto value = r.f32();
           auto full = s.formIDOf(id);
           if (!id.isZero() && id.type() != RefID::Type::kInvalid && full &&
-              (full & 0xFFFFFF) == (fid & 0xFFFFFF) &&
+              (exact ? full == fid : (full & 0xFFFFFF) == (fid & 0xFFFFFF)) &&
               (plugin.empty() || EqualsNoCase(s.pluginOf(full), plugin))) {
             ++matches;
             found = {&g, at, value, id};
@@ -331,7 +338,10 @@ json::Value Edit(const std::string &op, SaveFile &s, const Arguments &args) {
     report.o["preview"] = B(true);
     report.o["targetType"] = S(target.type);
     report.o["variables"] = Arr();
-    auto names = ops::ExtendedMembers(p, target.script);
+    // An array's elements have no member names: script 0 would be whichever script has string index 0.
+    decltype(ops::ExtendedMembers(p, target.script)) names;
+    if (target.type != "ArrayInfo")
+      names = ops::ExtendedMembers(p, target.script);
     for (std::size_t i = 0; i < target.vars->size(); ++i) {
       const auto &v = target.vars->at(i);
       auto row = Obj();

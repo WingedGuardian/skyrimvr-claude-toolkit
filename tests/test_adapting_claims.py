@@ -102,8 +102,14 @@ def test_adapting_md_has_no_unbacked_claim():
 
 
 def test_every_surface_and_agent_row_cites_the_decision_that_governs_it():
-    t = DOC.read_text(encoding="utf-8")
-    assert "[spec: D14]" in t and "[spec: D8]" in t
+    section = DOC.read_text(encoding="utf-8").split("## 8. Surfaces", 1)[1].split("\n## ", 1)[0]
+    rows = [l for l in section.splitlines() if l.startswith("| ") and not l.startswith(("| Surface ", "|---"))]
+    governs = {"Codex CLI": "[spec: D14]", "Codex desktop": "[spec: E24]", "Claude Code CLI": "[spec: E27]",
+               "Any other agent": "[spec: D8]"}
+    assert len(rows) == len(governs), rows
+    for start, cite in governs.items():
+        row = [r for r in rows if r.startswith("| " + start)]
+        assert len(row) == 1 and cite in row[0], (start, row)
 
 
 def test_the_status_words_in_the_doc_are_exactly_the_ones_the_validator_derives():

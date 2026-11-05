@@ -666,6 +666,28 @@ def _only_help(args) -> bool:
     return len(rest) == 1 and rest[0] in _HELP
 
 
+def save_lock_change(parsed) -> str:
+    """The word naming a `save-lock on|off|unlock` an agent runs: only the user changes save locking (ruling 2026-10-31).
+    The locks do not hold an elevated agent, so this is the only layer left there. `status` reads."""
+    for e in parsed.execs:
+        args = cli_args(e)
+        if args is None and e.program in ("bash", "sh") and e.argv and e.argv[0].replace("\\", "/").endswith("skyguard.sh"):
+            args = e.argv[1:]
+        if args is None and e.program.endswith("skyguard.sh"):
+            args = e.argv
+        if args is None:
+            continue
+        # Read the words themselves: an option's value or a store_true before the action must not hide it.
+        words = list(args)
+        if "save-lock" not in words or set(words) & _HELP:
+            continue
+        rest = words[words.index("save-lock") + 1:]
+        kept = [w for k, w in enumerate(rest) if not w.startswith("-") and not (k and rest[k - 1] == "--project")]
+        if kept and kept[0] in ("on", "off", "unlock"):
+            return "skyguard save-lock " + kept[0]
+    return ""
+
+
 def permanent(parsed, command: str) -> bool:
     for e in parsed.execs:
         args = cli_args(e)

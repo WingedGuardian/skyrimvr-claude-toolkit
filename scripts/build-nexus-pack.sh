@@ -6,7 +6,7 @@
 # plus `mod-page-full-rewrite.txt`, v3.5.4 added a `PATCH-ONLY` file, v3.7 renamed
 # the changelog to `CHANGELOG-for-nexus.txt`, **v3.5 and v3.5.3 shipped EMPTY
 # directories**, and **v3.9 split in two: a complete pack (zip, changelog,
-# description) landed on the //HUB/Downloads-Temp/Downloads share while the
+# description) landed on a network share while the
 # canonical home got only UPLOAD-NOTES.txt**.
 # `nexus-v3.8/` contains a zip named 3.8.1. Prose could not hold the shape; this
 # script is the shape.
@@ -106,7 +106,7 @@ if [ -n "$CHANGELOG_SRC" ]; then
     cp "$CHANGELOG_SRC" "$CHANGELOG_OUT" || die "could not copy changelog into the pack"
 elif [ ! -s "$CHANGELOG_OUT" ]; then
     awk -v ver="## $TAG" '
-        $0 == ver          { inblock = 1; next }
+        $0 == ver || index($0, ver " ") == 1 { inblock = 1; next }
         inblock && /^## /  { exit }
         inblock            { print }
     ' "$REPO_DIR/CHANGELOG.md" > "$DEST/NEXUS-CHANGELOG-$TAG.DRAFT.txt"

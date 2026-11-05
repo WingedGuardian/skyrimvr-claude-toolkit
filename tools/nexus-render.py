@@ -13,7 +13,7 @@ variable, so a key never reaches this file and no response is ever re-fetched. R
     nexus-render.py changelog [--since VERSION]  LOG
     nexus-render.py contents [VERSION]           FILES; fetches each file's content preview (below)
     nexus-render.py gql-find <name> <domain>     prints the GraphQL request body for `find`
-    nexus-render.py gql-req <modId>              prints the GraphQL request body for the requirements
+    nexus-render.py gql-req <modId> <domain>     prints the GraphQL request body for the requirements
 
 Nexus returns explicit nulls (category_name: null, version: null, updatedAt: null); every field read here
 tolerates one. A part that could not be fetched says so ("could NOT fetch requirements -- not the same as none"),
@@ -283,7 +283,7 @@ def main(argv):
     except (ValueError, AttributeError, TypeError) as e:
         print("ERROR: unparseable Nexus API response ({}: {})".format(type(e).__name__, e), file=sys.stderr)
         return 2
-    print("usage: nexus-render.py find | page <domain> <modId> | changelog | contents [version] | gql-find | gql-req"
+    print("usage: nexus-render.py find | page <domain> <modId> | changelog | contents [version] | gql-find <name> <domain> | gql-req <modId> <domain>"
           "   (got {})".format(args), file=sys.stderr)
     return 2
 

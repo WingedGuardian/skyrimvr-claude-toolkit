@@ -394,8 +394,13 @@ def pick_source(root: Path, from_dir):
         s = _set_from_dir(_label(str(from_dir)), from_dir)
         return s if s.era() == "3" else None
     cands = [_set_from_dir(LIVE, root)]
-    snap = _newest(list((root / ".claude" / "backups").glob("pre-update-*")))
-    if snap:
+    # Newest first, every one: a second snapshot taken after the extract is 4.x and must not hide the 3.x one.
+    snaps = list((root / ".claude" / "backups").glob("pre-update-*"))
+    while snaps:
+        snap = _newest(snaps)
+        if snap is None:
+            break
+        snaps.remove(snap)
         cands.append(_set_from_dir(snap.relative_to(root).as_posix(), snap))
     kb = _kb_store_set(root)
     if kb:
@@ -612,6 +617,14 @@ def _sh_quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
+def path_set_by_hand(verdict: str, values: dict, recorded: dict) -> bool:
+    """Should a carried path stay for good? Only an edited file can hold a correction, and 3.9's record tells a note
+    added to the file from a path changed in it. A path it holds no record of could be either, so it is kept and setup says so."""
+    if verdict != "edited":
+        return False
+    return any(recorded.get(name) != value for name, value in values.items())
+
+
 def paths_file(values: dict, how: str, src_label: str, env: dict) -> str:
     label = re.sub(r"[\r\n]+", " ", src_label)         # a folder name with a newline stays in the comment
     out = ["# Written by tools/migrate-3x.py: the paths your 3.x CLAUDE.md held, read from {}.".format(label),
@@ -628,7 +641,8 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
     known = json.loads(KNOWN_FILE.read_text(encoding="utf-8"))
     src = pick_source(root, from_dir)
     if src is None:
-        out("migrate-3x: no 3.x files found (this install is already 4.x, or --from holds none) -- nothing to do.")
+        out("migrate-3x: no 3.x files found -- nothing to do. On a fresh 4.x install that is all this means. If you just "
+            "extracted over a 3.x install with no pre-update snapshot, edits made before the extract were not kept here.")
         return 0
     out("migrate-3x: reading the 3.x files from " + src.label)
     if src.label == LIVE and from_dir is None:
@@ -713,6 +727,8 @@ def run(root: Path, from_dir=None, dry_run=False, out=print) -> int:
     if "CLAUDE.md" in verdicts:
         paths, how = extract_paths(norm(src.files["CLAUDE.md"].read_bytes()), known, src.env)
     paths_text = paths_file(paths, how, src.label, src.env) if paths else None
+    if paths_text is not None and path_set_by_hand(verdicts["CLAUDE.md"], paths, src.env):   # it outlives this one run
+        paths_text = paths_text.rstrip("\n") + "\nSKYRIM_3X_HAND_EDITED=1\n"
     paths_new = paths_text is not None and state.get("carried_paths") != paths
 
     if not copies and not blocks and not settings_actions and not paths_new:

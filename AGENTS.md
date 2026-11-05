@@ -268,7 +268,7 @@ Coverage and gaps: `docs/guard-coverage.md`.
   `FOF_ALLOWUNDO|FOF_WANTNUKEWARNING`), not `rm`/`Remove-Item`; only same-run scratch goes outright; too big
   for the bin -> ask. Say in chat first when a delete may need approval or raise an OS prompt. The guard
   judges these like any delete. Retention: `docs/RETENTION.md`.
-- **Resources:** own jobs share <=40% CPU/25% physical RAM, <=8 workers, low priority.
+- **Resources:** own jobs wait only past 90% CPU or under 3 GiB RAM left, <=8 workers, low priority.
   Physical RAM is primary; commit uses fixed 512/256/128 MiB buffers, never percentages.
   Games/user-directed work skip admission; games skip floors. See `docs/resource-policy.md`
   for admission, emergency/disk floors and probes.
@@ -386,7 +386,7 @@ Generated into `AGENTS.md` only; everything above is shared. Other agents: this 
 - **Checked:** every shell command and every `apply_patch`, including one run through the shell. Writing
   a plugin or archive (`.esp/.esm/.esl/.bsa/.ba2`) directly is refused; deleting in the game or config
   folders is refused; edits inside the game get advice. Files an `apply_patch` changes or deletes are
-  backed up to `.claude/backups/` first, and recent `.psc`/`.pex` are snapshotted before shell commands.
+  backed up to `.claude/backups/` first, and `.psc`/`.pex` are snapshotted before shell commands.
   A file written by a script you run is not backed up.
 - **DevBench MCP** (server name contains `devbench`): `smp reset` is refused; a save over an existing
   save is backed up first, then runs.

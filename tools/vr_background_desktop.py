@@ -422,8 +422,7 @@ class CurrentDesktop(BackgroundDesktop):
 
     def boundary(self, pids):
         result = super().boundary(pids)
-        result.update(mode="current-desktop", isolated=False,
-                      on_selected_desktop=result["private_window_pids"] == result["shared_desktop_window_pids"])
+        result.update(mode="current-desktop", isolated=False)
         return result
 
 

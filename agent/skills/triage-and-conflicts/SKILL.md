@@ -166,7 +166,7 @@ here is enforced by a guard: the checks are yours.
 
 - Every replaced file is backed up and every written file recorded with its SHA-256, under
   `.claude/backups/manual-installs/` (or `$SKYRIM_MANUAL_INSTALLS`): `<name>.files.txt` and
-  `backups/<name>-<stamp>/`. That is the uninstall.
+  `backups/<name>-<stamp>-<id>/` (the manifest's header names the exact folder). That is the uninstall.
 - An existing `.ini`/`.toml`/`.json` is kept; the archive's copy lands beside it as `<file>.new` to
   merge (`--overwrite-config` to replace it, backed up).
 - Writes go to a temp file swapped in, so a hardlinked file is replaced, not written through; each

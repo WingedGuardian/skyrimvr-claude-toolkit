@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import subprocess
 import sys
@@ -11,13 +12,15 @@ import urllib.request
 import uuid
 import zipfile
 
-from . import ARCHIVE_SHA256, ARCHIVE_URL, Refusal, UPSTREAM_VERSION
+from . import ARCHIVE_SHA256, ARCHIVE_URL, BACKEND_RUNTIME, Refusal, UPSTREAM_VERSION
 from .files import backup, contained, json_write, sha
+
+_MO2_PATH_KEYS = frozenset(("selected_profile", "gamepath", "base_directory", "profiles_directory", "mod_directory", "overwrite_directory"))
 
 
 def install_archive(archive, dest):
     if sha(archive) != ARCHIVE_SHA256:
-        raise Refusal("House Carl archive SHA256 does not match pinned 2.0.5; nothing extracted.")
+        raise Refusal("House Carl archive SHA256 does not match pinned " + UPSTREAM_VERSION + "; nothing extracted.")
     dest = Path(dest)
     if dest.exists():
         raise Refusal("Install destination already exists; use a new versioned installation directory.")
@@ -53,7 +56,7 @@ def download_archive(archive, opener=None):
     if sha(part) != ARCHIVE_SHA256:
         rejected = archive.with_name(archive.name + ".rejected-" + uuid.uuid4().hex)
         os.replace(part, rejected)
-        raise Refusal("Downloaded House Carl archive does not match pinned 2.0.5; kept as " + str(rejected)
+        raise Refusal("Downloaded House Carl archive does not match pinned " + UPSTREAM_VERSION + "; kept as " + str(rejected)
                       + " for inspection, nothing extracted.")
     os.replace(part, archive)
 
@@ -126,6 +129,27 @@ def unregister(config, agents):
     return removed
 
 
+def mo2_values(text):
+    """ModOrganizer.ini's values by lower-case key. MO2 writes its paths with doubled backslashes, often in @ByteArray()
+    (setup.sh decodes the same). An escape or a variant in a path key is refused; one in an unrelated key, such as a window
+    geometry, does not matter."""
+    import configparser
+    ini = configparser.ConfigParser(interpolation=None, strict=False)
+    ini.read_string(text)
+    values = {}
+    for section in ini.values():
+        for key, value in section.items():
+            value = value.strip().strip('"')
+            if value.startswith("@ByteArray(") and value.endswith(")"):
+                value = value[len("@ByteArray("):-1]
+            if key.casefold() in _MO2_PATH_KEYS:
+                if value.startswith("@") or re.search(r"(?<!\\)\\x[0-9A-Fa-f]{2}", value):
+                    raise Refusal("Unsupported MO2 QSettings encoding for " + key + "; resolve the path explicitly.")
+                value = value.replace("\\\\", "\\")
+            values[key.casefold()] = value
+    return values
+
+
 def setup(args):
     root = Path(args.root).resolve()
     state = root / ".skyguard/housecarl"
@@ -133,20 +157,24 @@ def setup(args):
         raise Refusal("Deployed/Wrye setup requires --plugins-txt and --config-dir.")
     if os.name != "nt":
         raise Refusal("The pinned House Carl server supports Windows x64 only.")
-    runtimes = subprocess.run(["dotnet", "--list-runtimes"], capture_output=True, text=True, check=True).stdout
-    for runtime in ("Microsoft.NETCore.App 9.", "Microsoft.AspNetCore.App 9."):
-        if runtime not in runtimes:
-            raise Refusal("Missing " + runtime + "x runtime; install it manually, then rerun setup.")
+    try:
+        runtimes = subprocess.run(["dotnet", "--list-runtimes"], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise Refusal("Could not run dotnet (" + type(exc).__name__ + "): install the " + BACKEND_RUNTIME + "x runtime "
+                      "manually, then rerun setup.")
+    if BACKEND_RUNTIME not in runtimes:
+        raise Refusal("Missing " + BACKEND_RUNTIME + "x runtime; install it manually, then rerun setup.")
     state.mkdir(parents=True, exist_ok=True)
-    archive = Path(args.archive).resolve() if args.archive else state / "houseCARL-2.0.5.zip"
+    archive = Path(args.archive).resolve() if args.archive else state / ("houseCARL-" + UPSTREAM_VERSION + ".zip")
     if not args.archive and not archive.exists():
         download_archive(archive)
     elif not args.archive and sha(archive) != ARCHIVE_SHA256:
-        raise Refusal(str(archive) + " does not match pinned 2.0.5 (an interrupted earlier download?). Move it to "
+        raise Refusal(str(archive) + " does not match pinned " + UPSTREAM_VERSION + " (an interrupted earlier download?). Move it to "
                       "the Recycle Bin and rerun setup to download it again; nothing extracted.")
     dest = state / "upstream" / (UPSTREAM_VERSION + "-" + uuid.uuid4().hex)
     server, hashes = install_archive(archive, dest)
     config = {"schema": 1, "root": str(root), "state_dir": str(state), "edition": args.edition,
+              "upstream_version": UPSTREAM_VERSION,
               "authority": "wrye-bash", "asset_provider": "deployed-data",
               "data_dir": str(Path(args.data_dir or root / "Data").resolve()),
               "plugins_txt": str(Path(args.plugins_txt or root / "plugins.txt").resolve()),
@@ -154,19 +182,8 @@ def setup(args):
               "server_hashes": hashes, "xelib_root": str(Path(args.xelib_root or root).resolve()),
               "node": shutil.which("node") or "node"}
     if args.mo2_instance:
-        import configparser
-        ini = configparser.ConfigParser(interpolation=None, strict=False)
         instance = Path(args.mo2_instance).resolve()
-        ini.read_string((instance / "ModOrganizer.ini").read_text(encoding="utf-8-sig"))
-        values = {}
-        for section in ini.values():
-            for key, value in section.items():
-                value = value.strip().strip('"')
-                if value.startswith("@ByteArray(") and value.endswith(")"):
-                    value = value[len("@ByteArray("):-1]
-                if value.startswith("@") or "\\\\" in value or "\\x" in value:
-                    raise Refusal("Unsupported MO2 QSettings encoding for " + key + "; resolve the path explicitly.")
-                values[key.casefold()] = value
+        values = mo2_values((instance / "ModOrganizer.ini").read_text(encoding="utf-8-sig"))
         if not values.get("selected_profile") or not values.get("gamepath"):
             raise Refusal("MO2 instance lacks selected_profile or gamePath; no fallback profile is chosen.")
         base = Path(values.get("base_directory", str(instance)))

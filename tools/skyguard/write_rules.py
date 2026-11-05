@@ -15,6 +15,8 @@ Without `roots` (an old caller) both fall back to the legacy text tests.
 from __future__ import annotations
 
 import os
+import posixpath
+import re
 
 from . import rules, self_rules, targets
 from .grep import grep
@@ -67,6 +69,13 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
         reason = rules.message("W-SAVE-STORE", file=file_path)
         audit.rule(HOOK, "W-SAVE-STORE", "deny", reason)
         return Verdict("deny", reason)
+    # A stream of the file is the file, and an 8.3 spelling resolves to nothing: read by the name, as the shell route does.
+    lock_word = re.split(r"[/\\]", file_path.replace("::$DATA", ""))[-1].split(":", 1)[0].lower()
+    bare = placed.split("::", 1)[0] if placed else placed
+    if (bare and self_rules.save_lock_target(bare, roots)) or (roots is not None and not placed and lock_word == "save-lock.json"):
+        reason = rules.message("W-SAVE-LOCK", file=lock_word)
+        audit.rule(HOOK, "W-SAVE-LOCK", "deny", reason)
+        return Verdict("deny", reason)
     # User ruling 2026-10-20: the agent's own session transcripts (save approvals are read there) are the host's alone.
     spoken = placed if roots is not None else targets.resolve_literal(file_path, cwd, env_)
     if spoken and self_rules.transcript_target(spoken, env_, transcript, holder=op in ("delete", "move")):
@@ -93,9 +102,11 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
         audit.rule(HOOK, "W-SELF-GUARD", "advise", text)
         return Verdict("allow", "", text)
 
-    if grep(r"(^|(?<![/\\])[/\\]+)\.claude[/\\]+(hooks|plans|backups|memory|projects)[/\\]+", file_path):
+    # `..` folded first: `.claude/backups/../../../Saves/x.ess` is not in .claude/backups.
+    folded = re.sub(r"^//+", "//", posixpath.normpath(file_path.replace("\\", "/")))
+    if grep(r"(^|(?<![/\\])[/\\]+)\.claude[/\\]+(hooks|plans|backups|memory|projects)[/\\]+", folded):
         return Verdict()
-    if grep(r"(?<![/\\])[/\\]+node_modules[/\\]+", file_path):
+    if grep(r"(?<![/\\])[/\\]+node_modules[/\\]+", folded):
         return Verdict()
 
     advice = Advice()
@@ -106,8 +117,11 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
         advice.add(text)
 
     if roots is not None:
-        from .writes import in_install_area, is_save
+        from .writes import _unplaced_save, in_install_area, is_save
         a = targets.resolve_literal(file_path, cwd, os.environ if env is None else env)
+        if a is None and _unplaced_save(file_path):
+            from . import saves     # a real path the guard cannot resolve: S-SAVE-UNKNOWN, as saves.py says
+            return saves.judge(saves.Change((saves.Target("", op if op in saves.OPS else "write", True),)), Verdict(), audit, HOOK)
         if is_save(a, roots):
             # The save policy (user ruling 2026-10-13): a save changed through Edit/Write or a patch is backed up
             # first (portable.check); saves.judge decides it with every other save the call changes.

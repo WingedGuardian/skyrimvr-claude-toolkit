@@ -7,15 +7,15 @@ binary is shipped.
 Steps, each checked; the first failure stops the build and nothing is installed:
   1. Windows, git, the MSVC build tools (Visual Studio 2022 Build Tools, "Desktop development with C++") and CMake
      3.21 or newer (on PATH, or the copy Visual Studio bundles) are present.
-  2. Tonycubed2/ResaverPP is fetched at UPSTREAM_COMMIT (19.6) with line-ending conversion OFF; the checkout's HEAD is
+  2. Tonycubed2/ResaverPP is fetched at UPSTREAM_COMMIT (51) with line-ending conversion OFF; the checkout's HEAD is
      verified against the pin. An existing cache must be clean, at the pin, and conversion-free, or it is refused.
-  3. The upstream tree is copied into fresh owned staging. Each of the 27 patches is checked (`git apply --check`) and
-     applied, in order; the 15 additions are copied in (none may replace an upstream file).
+  3. The upstream tree is copied into fresh owned staging. Each of the 10 patches is checked (`git apply --check`) and
+     applied, in order; the 16 additions are copied in (none may replace an upstream file).
   4. Every changed and added file is compared with SOURCE-SHA256. One byte different and the build stops.
   5. CMake configures the command-line tool and the tests with the GUI OFF, and builds them with one MSBuild job and
      one compiler worker by default (--jobs 2 at most).
-  6. CTest runs. The six runnable targets (unit, decoder_port, topic113, expected_result, structured_queries,
-     analysis_contract) must all pass; the real-save `fixtures` target is skipped by design. Anything else -- a
+  6. CTest runs. The seven runnable targets (unit, decoder_port, topic113, expected_result, structured_queries,
+     analysis_contract, le_bounds) must all pass; the real-save `fixtures` target is skipped by design. Anything else -- a
      failure, a missing target, an unexpected one -- refuses the install.
   7. Only then: resaverpp-cli.exe is installed into tools/resaver-plus/build/ with BUILD-INFO.json (pins, patch-set
      hash, per-file source hashes, the tool versions found, the executable's SHA-256 and the CTest summary). A previous
@@ -47,11 +47,11 @@ PATCHES = HERE / "patches"
 ADDITIONS = HERE / "additions"
 MANIFEST = HERE / "SOURCE-SHA256"
 UPSTREAM_REPO = "https://github.com/Tonycubed2/ResaverPP"
-UPSTREAM_VERSION = "19.6"
-UPSTREAM_COMMIT = "0d48f60cb8a69b367abfbd78d58418e64c507da5"
-EXPECTED_PATCHES = 27
-EXPECTED_ADDITIONS = 15
-REQUIRED_TESTS = ("unit", "decoder_port", "topic113", "expected_result", "structured_queries", "analysis_contract")
+UPSTREAM_VERSION = "51"
+UPSTREAM_COMMIT = "098eb8c1c3a23552c7662a2083f4aca9a2ff41f4"
+EXPECTED_PATCHES = 10
+EXPECTED_ADDITIONS = 16
+REQUIRED_TESTS = ("unit", "decoder_port", "topic113", "expected_result", "structured_queries", "analysis_contract", "le_bounds")
 SKIPPED_TESTS = ("fixtures",)        # real saves; never configured here
 EXECUTABLE = "resaverpp-cli.exe"
 CMAKE_MINIMUM = (3, 21)
@@ -69,7 +69,7 @@ class BuildError(Exception):
 def run(cmd, cwd=None, env=None, timeout=3600):
     """One checked step. Every external program goes through here (the tests replace it)."""
     r = subprocess.run([str(c) for c in cmd], cwd=None if cwd is None else str(cwd), env=env, capture_output=True,
-                       text=True, timeout=timeout)
+                       text=True, errors="replace", timeout=timeout)
     if r.returncode != 0:
         raise BuildError("{} failed: {}".format(" ".join(map(str, cmd[:4])), (r.stderr or r.stdout).strip()[-600:]))
     return r.stdout.strip()
@@ -78,7 +78,7 @@ def run(cmd, cwd=None, env=None, timeout=3600):
 def run_result(cmd, cwd=None, timeout=3600):
     """A step whose failure is decided by the caller (CTest's summary)."""
     r = subprocess.run([str(c) for c in cmd], cwd=None if cwd is None else str(cwd), capture_output=True, text=True,
-                       timeout=timeout)
+                       errors="replace", timeout=timeout)
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
@@ -217,9 +217,11 @@ def fetch(repo: str, commit: str, dest: Path) -> None:
         if code != 0 or conversion.strip().lower() != "false":
             raise BuildError("source cache converts line endings (core.autocrlf is not false); its bytes are not the "
                              "pinned ones. Use a fresh --work directory: {}".format(dest))
-        dirty = run([*GIT, "-C", dest, "status", "--porcelain", "--untracked-files=all"])
+        # --ignored: an ignored file is copied and compiled like any other.
+        dirty = run([*GIT, "-C", dest, "status", "--porcelain", "--untracked-files=all", "--ignored"])
         if dirty:
-            raise BuildError("source cache has local changes; preserve them before building: {}".format(dest))
+            raise BuildError("source cache has local changes (or an earlier download was interrupted); preserve anything "
+                             "you need, then use a new --work folder: {}".format(dest))
         head = run([*GIT, "-C", dest, "rev-parse", "HEAD"])
         verify_head(head, commit, repo)
         return
@@ -230,8 +232,31 @@ def fetch(repo: str, commit: str, dest: Path) -> None:
     verify_head(run([*GIT, "-C", dest, "rev-parse", "HEAD"]), commit, repo)
 
 
+def remove_owned_builds(work: Path) -> list:
+    """Each build leaves one full tree: kept after a failure to read, or for a caller's --keep-build. The next build removes
+    earlier ones. Only trees this builder declared, by the marker it wrote when it made them: they rebuild from the pinned
+    commit and the patches here, so they are deleted, not recycled."""
+    removed = []
+    for tree in sorted(Path(work).glob("owned-build-*")):
+        marker = tree / ".toolkit-build-owner.json"
+        try:
+            data = json.loads(marker.read_text(encoding="utf-8"))
+            ours = isinstance(data, dict) and data.get("builder") == "tools/resaver-plus/build.py"
+        except (OSError, ValueError):
+            ours = False                                   # not declared by this builder: left alone
+        if ours and tree.is_dir() and not tree.is_symlink():
+            try:
+                shutil.rmtree(tree)
+            except OSError as e:                           # a scanner holding a file: tidiness, never a failed build
+                print("note: could not remove the old build tree {} ({}); it is safe to delete".format(tree, e), file=sys.stderr)
+                continue
+            removed.append(tree)
+    return removed
+
+
 def stage(work: Path, upstream: Path) -> Path:
     """Fresh owned staging under `work`, holding a copy of the upstream tree in staging/source."""
+    remove_owned_builds(work)
     owned = Path(tempfile.mkdtemp(prefix="owned-build-", dir=str(work))).resolve()
     if owned.parent != work:
         raise BuildError("staging resolved outside the selected work directory")
@@ -325,11 +350,24 @@ def compiler_info(out: Path, configure_text: str) -> dict:
     return info
 
 
+def smoke_cli(exe: Path, owned: Path) -> None:
+    """Run the built program once: asked to read a save that does not exist, it must answer with a refusal in its own
+    words, not crash and not claim success. No test target launches it."""
+    code, text = run_result([exe, "info", owned / "no-such-save.ess"])
+    if code == 0 or code < 0 or code > 255 or not text.strip():
+        raise BuildError("the built {} did not refuse a missing save cleanly (exit {}): {}".format(EXECUTABLE, code, text[:300]))
+
+
 def install(executable: Path, info: dict, dest: Path = None) -> Path:
     """Rotate any previous build aside (never delete it), then install the executable and, LAST, BUILD-INFO.json: a
     crash between the two leaves no BUILD-INFO, and the adapter refuses to run without one."""
     dest = Path(dest or BUILD)
     dest.mkdir(parents=True, exist_ok=True)
+    # Copied and checked first: a full disk or a bad copy must leave the working build where it is.
+    tmp = dest / (EXECUTABLE + ".installing")
+    shutil.copyfile(str(executable), str(tmp))
+    if sha(tmp) != info["sha256"]:
+        raise BuildError("the installed copy differs from the tested executable")
     old = [dest / EXECUTABLE, dest / "BUILD-INFO.json"]
     if any(p.exists() for p in old):
         keep = dest / "previous" / "{}-{}".format(time.strftime("%Y%m%d-%H%M%S"), os.getpid())
@@ -337,10 +375,6 @@ def install(executable: Path, info: dict, dest: Path = None) -> Path:
         for p in old:
             if p.exists():
                 os.replace(str(p), str(keep / p.name))
-    tmp = dest / (EXECUTABLE + ".installing")
-    shutil.copyfile(str(executable), str(tmp))
-    if sha(tmp) != info["sha256"]:
-        raise BuildError("the installed copy differs from the tested executable")
     os.replace(str(tmp), str(dest / EXECUTABLE))
     meta = dest / "BUILD-INFO.json.installing"
     meta.write_text(json.dumps(info, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -348,7 +382,7 @@ def install(executable: Path, info: dict, dest: Path = None) -> Path:
     return dest / EXECUTABLE
 
 
-def build(work: Path, jobs: int = 1, dest: Path = None) -> dict:
+def build(work: Path, jobs: int = 1, dest: Path = None, keep_build: bool = False) -> dict:
     if not windows():
         raise BuildError("ReSaver Plus builds with MSVC on Windows only; the Java backend is the cross-platform path")
     if jobs not in (1, 2):
@@ -383,12 +417,15 @@ def build(work: Path, jobs: int = 1, dest: Path = None) -> dict:
     exe = out / "Release" / EXECUTABLE
     if not exe.is_file():
         raise BuildError("the build reported success but produced no " + EXECUTABLE)
+    smoke_cli(exe, owned)
     info = {"schema": 1, "upstream_repo": UPSTREAM_REPO, "upstream_version": UPSTREAM_VERSION,
             "upstream_commit": UPSTREAM_COMMIT, "patches": len(patches), "additions": len(additions),
             "patch_set_sha256": patch_set_hash(patches), "source_sha256": hashes, "gui": False,
             "tools": versions, "tested_tools": TESTED, "ctest": summary, "executable": EXECUTABLE,
             "sha256": sha(exe), "staging": owned.name, "built": time.strftime("%Y-%m-%dT%H:%M:%S")}
     install(exe, info, dest)
+    if not keep_build:
+        remove_owned_builds(work)                          # installed and tested: its tree rebuilds from the pin
     return info
 
 
@@ -399,10 +436,12 @@ def main(argv=None) -> int:
     parser.add_argument("--install", type=Path, default=BUILD,
                         help="where the tested executable and BUILD-INFO.json go (default tools/resaver-plus/build; "
                              "the adapter reads only that one)")
+    parser.add_argument("--keep-build", action="store_true", help="keep the build tree after a successful install "
+                        "(it holds the test programs); a failed build's tree is always kept until the next build")
     args = parser.parse_args(argv)
     try:
-        info = build(args.work.resolve(), args.jobs, args.install.resolve())
-    except (BuildError, OSError, subprocess.SubprocessError) as e:
+        info = build(args.work.resolve(), args.jobs, args.install.resolve(), args.keep_build)
+    except (BuildError, OSError, subprocess.SubprocessError, ValueError) as e:
         print("ERROR: {}".format(e), file=sys.stderr)
         return 2
     differs = [k for k in ("msvc", "cmake") if not str(info["tools"].get(k, "")).startswith(TESTED[k].split("-")[0])]

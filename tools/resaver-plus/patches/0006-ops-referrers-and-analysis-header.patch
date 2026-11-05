@@ -1,0 +1,39 @@
+diff --git a/src/core/Ops.h b/src/core/Ops.h
+index b1f2918..2c5dcbe 100644
+--- a/src/core/Ops.h
++++ b/src/core/Ops.h
+@@ -107,6 +107,8 @@ namespace ess::ops
+ 		std::string   where;
+ 	};
+ 	std::vector<Referrer> FindReferrers(const Papyrus& p, EID a_target);
++	// One scan for a set of targets; optional self edges support complete graph diagnostics.
++	std::vector<Referrer> FindReferrers(const Papyrus& p, const std::set<EID>& targets, bool includeSelf = false);
+ 
+ 	// ---- analysis ------------------------------------------------------------------------
+ 	struct Count
+@@ -114,6 +116,15 @@ namespace ess::ops
+ 		std::string name;
+ 		std::size_t n = 0;
+ 	};
++	// Findings are observations, not instructions to clean a save. Only explicit
++	// structural failures block saving; numeric heuristics remain advisory.
++	struct Finding
++	{
++		std::string code, message;
++		std::size_t count = 0;
++		std::vector<std::string> samples;  // at most eight identities
++		bool blocksSaving = false;
++	};
+ 	struct Report
+ 	{
+ 		std::size_t scripts = 0, instances = 0, references = 0, arrays = 0, threads = 0, functionMessages = 0, suspended = 0, changeForms = 0, strings = 0;
+@@ -124,6 +135,9 @@ namespace ess::ops
+ 		std::vector<Count> messagesByFunction;
+ 		std::vector<Count> instancesByScript;
+ 		std::vector<Count> changeFormsByType;
++		std::size_t frames = 0, maxStackDepth = 0;
++		std::vector<Count> framesByScript;
++		std::vector<Finding> findings;             // stable codes and bounded evidence
+ 		std::vector<std::string> warnings;          // plain-language findings
+ 		std::vector<std::string> loopingScripts;    // scripts with 20+ threads parked in Utility.Wait
+ 		bool                     mcmJam = false;    // SkyUI registration was mid-way (FixMcmJam applies)

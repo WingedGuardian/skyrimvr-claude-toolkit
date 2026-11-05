@@ -201,9 +201,9 @@ def test_a_degraded_hook_canary_is_red(tmp_path, payload):
 
 
 def _setup_documents_below_login_home():
-    """Does setup.sh's Documents folder sit below C:/Users/<whoami> here? Whenever PowerShell gives no answer (Linux,
-    or Windows under the test harness's made-up profile -- MEASURED: an empty line) setup writes its
-    C:/Users/<whoami>/Documents fallback; otherwise when the real Documents is not redirected elsewhere."""
+    """Does setup.sh's Documents folder sit below a home verify-release allow-lists? Off Windows it is below the scrubbed
+    $HOME. On Windows, when PowerShell gives no answer (the test harness's made-up profile -- MEASURED: an empty line),
+    setup writes its C:/Users/<whoami>/Documents fallback; otherwise when the real Documents is not redirected elsewhere."""
     login = subprocess.run([BASH, "-c", "whoami"], capture_output=True, text=True, timeout=30).stdout.strip()
     docs = ""
     if os.name == "nt":
@@ -213,10 +213,10 @@ def _setup_documents_below_login_home():
 
 
 def test_the_config_folder_setup_writes_is_allow_listed_in_the_scrubbed_install(tmp_path, payload):
-    """CI run 38178385999 (ubuntu-latest): setup.sh wrote its fallback C:/Users/runner/Documents/My Games/Skyrim VR
-    while the real home was /home/runner, so the validated config folder was NOT allow-listed and the six files
-    naming it were reported as leaks. verify-release now also validates it below C:/Users/<whoami>. Here the test's
-    home is a made-up one, so only that second home can allow-list the folder setup really wrote."""
+    """CI run 38178385999 (ubuntu-latest): the folder setup wrote was not below the real home, so the validated config
+    folder was NOT allow-listed and the six files naming it were reported as leaks. verify-release also validates it
+    below C:/Users/<whoami> and, since setup's POSIX fallback (CI run 41891455513), below the scrubbed $HOME. Here the
+    test's home is a made-up one, so only those can allow-list the folder setup really wrote."""
     if not _setup_documents_below_login_home():
         pytest.skip("this machine's Documents folder is not below C:/Users/<whoami>; the precondition does not hold")
     r = _verify(tmp_path, _variant(tmp_path, payload), "--scrubbed")

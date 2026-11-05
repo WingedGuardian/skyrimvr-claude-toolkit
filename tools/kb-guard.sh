@@ -176,12 +176,20 @@ for name in $WATCHED; do
         largest_copy_of "$name"
         if [ "$LARGEST_SIZE" -gt 0 ]; then
             checked=$((checked + 1))
-            alarms="$alarms
+            # Once per loss: a stored copy is kept forever, so without this a file removed on purpose alarms every session.
+            if [ -f "$STORE/.gone-$name" ]; then
+                notes="$notes
+  note: $name is still gone; the largest stored copy is $LARGEST_SIZE bytes ($LARGEST_PATH)"
+            else
+                : > "$STORE/.gone-$name" 2>/dev/null
+                alarms="$alarms
   $name is GONE. Its largest stored copy is $LARGEST_SIZE bytes.
 $(where_to_recover "$name" "${prior:-$LARGEST_PATH}")"
+            fi
         fi
         continue
     fi
+    rm -f "$STORE/.gone-$name" 2>/dev/null
 
     checked=$((checked + 1))
     cur=$(bytes "$live")
@@ -264,8 +272,8 @@ recycle_dirs() {
             [ -n "$cand" ] || continue
             if [ -e "$cand" ]; then run=("$cand"); else IFS=' ' read -r -a run <<< "$cand"; fi
             "${run[@]}" -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1 || continue
-            # Said BEFORE anything goes to the bin, so Windows' own "too big" prompt is never a surprise.
-            echo "Moving $total old knowledgebase snapshot(s) from $STORE to the Recycle Bin; if Windows says one is too big for the bin, it will ask you before deleting it permanently -- answer No to keep it."
+            # Said BEFORE anything goes to the bin. An item too big for it stays in place and is reported.
+            echo "Moving $total old knowledgebase snapshot(s) from $STORE to the Recycle Bin; anything too big for the bin stays where it is."
             out=$("${run[@]}" -B "$hk" recycle "${native[@]}" 2>&1)
             ok=$(printf '%s\n' "$out" | grep -c "^OK"$'	')
             why=$(printf '%s\n' "$out" | grep -m1 "^FAILED"$'	' | cut -f3)

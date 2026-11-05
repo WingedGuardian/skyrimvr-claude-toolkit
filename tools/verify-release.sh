@@ -249,7 +249,9 @@ fi
 # Anchored, fixed-string, and end-of-heading: `grep -q "## $TAG"` matched `## v3.9.1` when the tag was v3.9.
 if [ -n "$TAG" ]; then
   VER_RE=$(printf '%s' "${TAG#v}" | sed 's/[.]/[.]/g')
-  if grep -qE "^#{1,3} +\[?v?${VER_RE}\]?([^0-9.]|$)" "$ROOT/CHANGELOG.md" 2>/dev/null; then
+  if grep -E "^#{1,3} +\[?v?${VER_RE}\]?([^0-9.]|$)" "$ROOT/CHANGELOG.md" 2>/dev/null | grep -qi "unreleased"; then
+    bad "CHANGELOG section" "the $TAG heading still says unreleased"
+  elif grep -qE "^#{1,3} +\[?v?${VER_RE}\]?([^0-9.]|$)" "$ROOT/CHANGELOG.md" 2>/dev/null; then
     ok "CHANGELOG carries a $TAG section"
   else
     bad "CHANGELOG section" "no '## $TAG' heading"
@@ -403,6 +405,7 @@ except Exception:
   # /home/<login> REAL_HOME. Never an --allow-prefix: only a config folder of that exact shape is allowed.
   cfg_homes=(--home "$(winpath "${REAL_HOME}")")
   login=$(whoami 2>/dev/null) && [ -n "$login" ] && cfg_homes+=(--home "C:/Users/$login")
+  cfg_homes+=(--home "$(winpath "$FAKEHOME")")           # off Windows setup writes below the scrubbed $HOME
   [ -n "$cfg" ] && allow+=(--allow-config "$cfg" "${cfg_homes[@]}")
   # Named by role, never printed: on this machine both sit under the maintainer's home (review N1).
   note "allowed in generated files (machine discovery)" "the Python install${cfg:+, the config folder if shaped right}"

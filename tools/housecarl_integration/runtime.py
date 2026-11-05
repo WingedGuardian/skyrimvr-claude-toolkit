@@ -18,6 +18,11 @@ WRITES = {"housecarl_apply", "housecarl_create", "housecarl_remove", "housecarl_
 
 
 def verify_installation(config):
+    # A toolkit update changes the pin, not the backend already set up: without this the status commands name the pinned
+    # version over the older files they just verified, and real calls fail on the version the backend reports.
+    if config.get("upstream_version") != UPSTREAM_VERSION:
+        raise Refusal("House Carl was set up as " + str(config.get("upstream_version", "an older version")) + "; this toolkit pins "
+                      + UPSTREAM_VERSION + ". Rerun tools/housecarl.py setup with the same paths; the old backend stays in place.")
     server = Path(config["server"])
     expected = config["server_hashes"]
     required = {server.name, "housecarl-mcp.dll", "housecarl-core.dll", "corpus.json"}

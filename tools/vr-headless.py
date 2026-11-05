@@ -215,14 +215,17 @@ def steamvr_folder(steam: Path) -> Path:
 
 
 def steamvr_running() -> bool:
+    """SteamVR or the game is running, or that cannot be told. Under OpenComposite the game runs with no vrserver."""
     if os.name != "nt":
         return False
     try:
-        r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq vrserver.exe", "/NH"], capture_output=True, text=True,
-                           timeout=30)
+        r = subprocess.run(["tasklist", "/NH", "/FO", "CSV"], capture_output=True, text=True, errors="replace", timeout=30)
     except (OSError, subprocess.TimeoutExpired):
-        return False
-    return "vrserver.exe" in r.stdout.lower()
+        return True                     # unknown is never absent: `on` holds until it can tell
+    if r.returncode != 0 or not r.stdout.strip():
+        return True                     # a tasklist that failed says nothing either
+    low = r.stdout.lower()
+    return "vrserver.exe" in low or "skyrimvr.exe" in low
 
 
 def paths():
@@ -346,13 +349,16 @@ def read_process_tree():
                "@{n='Id';e={$_.ProcessId}},@{n='ParentId';e={$_.ParentProcessId}},"
                "@{n='Path';e={$_.ExecutablePath}},"
                "@{n='StartTime';e={$_.CreationDate.ToUniversalTime().ToString('o')}} | ConvertTo-Json -Compress")
-    try:
-        r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command], capture_output=True,
-                           text=True, check=True, timeout=8)
-        value = json.loads(r.stdout)
-        return value if isinstance(value, list) else [value]
-    except (OSError, subprocess.SubprocessError, ValueError) as e:
-        raise ProcessReadError("process ancestry is unreadable: {}".format(e)) from e
+    failure = None
+    for _ in range(3):                    # launch load can outlast one read; a refused launch leaves files headless
+        try:
+            r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command], capture_output=True,
+                               text=True, check=True, timeout=8)
+            value = json.loads(r.stdout)
+            return value if isinstance(value, list) else [value]
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
+            failure = e
+    raise ProcessReadError("process ancestry is unreadable: {}".format(failure)) from failure
 
 
 def refresh_launch_lifetimes(session, desk):
@@ -618,7 +624,8 @@ def backup(src: Path, dst: Path) -> str:
 def set_aside(live: Path, folder: Path) -> None:
     """Take a file out of play by MOVING it into the run's backup folder (never deleting it)."""
     folder.mkdir(parents=True, exist_ok=True)
-    os.replace(str(live), str(folder / "{}-{}".format(datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f"),
+    # shutil.move: the backup folder can be on another drive, where os.replace cannot go.
+    shutil.move(str(live), str(folder / "{}-{}".format(datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f"),
                                                        live.name)))
 
 
@@ -740,7 +747,8 @@ def cmd_on(force=False, park=False) -> int:
         if not p[k].is_file():
             raise Refused("{} not found: {}".format(k.replace("_", " "), p[k]))
     if steamvr_running() and not force:
-        raise Refused("SteamVR is running; it rewrites steamvr.vrsettings when it exits. Close it, then run `on` again "
+        raise Refused("SteamVR or the game is running (or tasklist could not tell); SteamVR rewrites steamvr.vrsettings when it "
+                      "exits. Close it, then run `on` again "
                       "(--force to proceed anyway).")
     if already_headless(json.loads(p["vrsettings"].read_text(encoding="utf-8"))):
         raise Refused("{} already forces or enables the null driver, so `off` would restore a headless setup. Put "
@@ -1202,6 +1210,9 @@ def cmd_run(desktop, park=False, emu=False, force=False) -> int:
     st = load_state()
     if st and (st.get("mode") != "on" or st.get("session")):
         raise Refused("`run` needs a fresh session or one prepared by `on`; finish the existing one first (`stop`)")
+    if emu and desktop == "background" and not (st or {}).get("emu"):
+        raise Refused("`run --desktop background --emu` cannot prepare the driver: installing it needs Steam closed and a "
+                      "background session needs Steam open. Close Steam, run `emu on`, open Steam, then run this again")
     error = None
     try:
         if not st:

@@ -440,7 +440,8 @@ def test_a_url_held_in_a_same_command_variable_is_resolved():
 def test_the_powershell_cmdlets_are_read():
     for cmd in (f"Invoke-RestMethod -Uri {CONSOLE} -Method Post -Body '{{\"command\":\"smp reset\"}}'",
                 f"irm {CONSOLE} -Body '{{\"command\":\"smp reset\"}}'",
-                f"Invoke-WebRequest -Uri {CONSOLE} -Body '{{\"command\":\"smp reset\"}}' -Method POST"):
+                f"Invoke-WebRequest -Uri {CONSOLE} -Body '{{\"command\":\"smp reset\"}}' -Method POST",
+                f"irm {CONSOLE} -Body '{{\"command\":\"smp\\u0020reset\"}}'"):    # only reading the JSON finds this one
         assert shell(cmd, shell_name="powershell")[1] == {"S-DEVBENCH-CRASH"}, cmd
     assert shell(f"irm {CONSOLE}", shell_name="powershell")[0] == ("allow", "")
 

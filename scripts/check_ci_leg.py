@@ -70,10 +70,12 @@ def check_log(lines, spec, leg, shards=None):
     # Real `pytest -v` output piped to a file reads `collecting ... collected N items` on one line (MEASURED
     # 2026-10-06). The match is anchored at the line start, so a node id carrying the same words in its
     # parameters never counts.
+    whole = 0
     for k, s in enumerate(shards):
         where = " in shard {} of {}".format(k + 1, len(shards)) if len(shards) > 1 else ""
         collected = next((int(m.group(1)) for l in s
                           for m in [re.match(r"^(?:collecting \.\.\. )?collected (\d+) items?\b", l)] if m), None)
+        whole = max(whole, collected or 0)
         if collected is None:
             problems.append("no 'collected N items' line{}: was the suite run with -v?".format(where))
         elif collected < spec["collected_floor"]:
@@ -84,6 +86,9 @@ def check_log(lines, spec, leg, shards=None):
     skipped, xfailed = _count(summary, "skipped"), _count(summary, "xfailed")
     if len(shards) > 1:
         notes.append("{} shard logs summed".format(len(shards)))
+        ran = _count(summary, "passed") + _count(summary, "failed") + skipped + xfailed
+        if ran < whole:
+            problems.append("the shards ran {} of the {} collected: a shard selector is wrong".format(ran, whole))
     ceiling = spec["skip_ceiling"][leg]
     if skipped > ceiling:
         problems.append("{} skipped > the {} leg's ceiling {}: something stopped running".format(skipped, leg, ceiling))

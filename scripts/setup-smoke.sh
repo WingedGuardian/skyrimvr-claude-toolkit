@@ -70,6 +70,7 @@ case "$sel" in generic|opencode)
     printf '%s\n' "$out" | grep -q 'does not prove a host intercepted' \
         && ok "portable setup does not claim interception" || fail "portable interception disclosure missing" ;;
 esac
+[ -f "$GAME/.codex/hooks.json" ] || fail ".codex/hooks.json is missing"
 if grep -q '{{CODEX_ROOT' "$GAME/.codex/hooks.json"; then
     [ -z "$WANT_HOOKS" ] && ok ".codex/hooks.json left unrendered" || fail ".codex/hooks.json not rendered"
     printf '%s\n' "$out" | grep -q "Codex:       NOT CONFIGURED" && ok "says Codex is not configured" \
@@ -78,6 +79,7 @@ else
     [ -n "$WANT_HOOKS" ] && ok ".codex/hooks.json rendered" || fail ".codex/hooks.json rendered for an unselected agent"
 fi
 for h in "$GAME"/.claude/hooks/*.sh "$GAME"/.codex/hooks/skyguard-entry.*; do
+    [ -f "$h" ] || fail "${h#"$GAME"/}: hook file is missing"
     grep -q '{{PYTHON_PATH}}' "$h" && fail "${h#"$GAME"/}: interpreter placeholder left"
 done
 [ -s "$GAME/skyrim-paths.env" ] && grep -q "^SKYRIM_GAME_ROOT='" "$GAME/skyrim-paths.env" \

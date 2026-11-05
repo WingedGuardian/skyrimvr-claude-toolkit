@@ -2,7 +2,7 @@
 
 git, CMake and CTest are replaced by a recording fake (no network, no compiler, any platform). Each refusal has its
 own test, and each test asserts the step the refusal must PREVENT never ran: a refused build installs nothing.
-The real patch set is checked too: SOURCE-SHA256 must cover exactly what the 27 patches change and the 15 additions
+The real patch set is checked too: SOURCE-SHA256 must cover exactly what the 10 patches change and the 16 additions
 add (the bytes themselves are reproduced against upstream by the Windows CI job, which builds for real).
 """
 from __future__ import annotations
@@ -31,10 +31,10 @@ def _sha(b: bytes) -> str:
 
 
 GOOD_CTEST = "\n".join(["Test project x"] + [
-    "  {}/7 Test #{}: {} ....................   Passed    0.05 sec".format(i + 1, i + 1, n)
+    "  {}/8 Test #{}: {} ....................   Passed    0.05 sec".format(i + 1, i + 1, n)
     for i, n in enumerate(("unit", "decoder_port", "topic113", "expected_result", "structured_queries",
-                           "analysis_contract"))] + [
-    "  7/7 Test #7: fixtures .....................***Skipped   0.01 sec", "100% tests passed"])
+                           "analysis_contract", "le_bounds"))] + [
+    "  8/8 Test #8: fixtures .....................***Skipped   0.01 sec", "100% tests passed"])
 UPSTREAM = {"src/a.cpp": b"int a;\n", "CMakeLists.txt": b"project(x)\n"}
 PATCHED = b"int a; // patched\n"
 ADDED = b"// added\n"
@@ -98,6 +98,8 @@ class Fake:
         self.calls.append(cmd)
         if "config" in cmd:
             return 0, self.crlf + "\n"
+        if "info" in cmd:                       # the built program, asked to read a save that does not exist
+            return getattr(self, "smoke", (1, '{"ok":false,"error":"cannot open"}'))
         return self.ctest
 
     def ran(self, word):
@@ -265,18 +267,33 @@ def test_off_windows_it_says_so_and_runs_nothing(env, monkeypatch):
 def test_the_shipped_patch_set_is_complete_and_the_manifest_covers_exactly_it():
     mod = _load()
     patches, additions, manifest = mod.patch_files(), mod.addition_files(), mod.read_manifest()
-    assert len(patches) == mod.EXPECTED_PATCHES == 27
-    assert len(additions) == mod.EXPECTED_ADDITIONS == 15
+    assert len(patches) == mod.EXPECTED_PATCHES == 10
+    assert len(additions) == mod.EXPECTED_ADDITIONS == 16
     mod.check_inputs(patches, additions, manifest)
     assert sorted(r for r, (_h, k) in manifest.items() if k == "patched") == sorted(mod.patched_paths(patches))
     assert len([1 for _h, k in manifest.values() if k == "patched"]) == 10
+
+
+def test_every_doc_states_the_real_patch_counts_and_target_count():
+    """The port to upstream 51 left "27 patches and 15 additions" and "six" in the CHANGELOG and the install guide."""
+    mod = _load()
+    words = {6: "six", 7: "seven", 8: "eight"}
+    counts = "{} patches and {} additions".format(mod.EXPECTED_PATCHES, mod.EXPECTED_ADDITIONS)
+    runnable = "all {} ".format(words[len(mod.REQUIRED_TESTS)])
+    for name in ("CHANGELOG.md", "docs/installing-tools.md", "tools/resaver-plus/README.md"):
+        text = (REPO / name).read_text(encoding="utf-8")
+        assert counts in text and runnable in text, name
+    for name in ("README.md", "SETUP_PROMPT.txt", "docs/getting-started.md"):
+        assert "its {} tests pass".format(words[len(mod.REQUIRED_TESTS)]) in (REPO / name).read_text(encoding="utf-8"), name
+    assert "all {} tests pass".format(words[len(mod.REQUIRED_TESTS)]) in (REPO / "setup.sh").read_text(encoding="utf-8")
+    assert all(t in (mod.__doc__ or "") for t in mod.REQUIRED_TESTS), "the docstring names every target"
 
 
 def test_the_shipped_patches_are_lf_only_and_hold_no_contribution_drafts():
     files = [p for p in HERE.rglob("*") if p.is_file()]
     assert not [p for p in files if p.name.endswith("-PR.md") or "contributions" in p.relative_to(HERE).parts]
     shipped = [p for p in files if p.relative_to(HERE).parts[0] in ("patches", "additions")]
-    assert len(shipped) == 42
+    assert len(shipped) == 26
     assert not [p.name for p in shipped if b"\r\n" in p.read_bytes()]
 
 
@@ -286,3 +303,13 @@ def test_the_manifest_rejects_a_damaged_line(tmp_path):
     bad.write_text("abc patched x\n", encoding="utf-8")
     with pytest.raises(mod.BuildError, match="unreadable"):
         mod.read_manifest(bad)
+
+
+def test_only_trees_this_builder_declared_are_removed(tmp_path):
+    ours, theirs, unreadable = tmp_path / "owned-build-a", tmp_path / "owned-build-b", tmp_path / "owned-build-c"
+    for d in (ours, theirs, unreadable):
+        d.mkdir()
+    (ours / ".toolkit-build-owner.json").write_text('{"builder": "tools/resaver-plus/build.py"}', encoding="utf-8")
+    (theirs / ".toolkit-build-owner.json").write_text('{"builder": "someone else"}', encoding="utf-8")
+    assert _load().remove_owned_builds(tmp_path) == [ours]
+    assert not ours.exists() and theirs.is_dir() and unreadable.is_dir()

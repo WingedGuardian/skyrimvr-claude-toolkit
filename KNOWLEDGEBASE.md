@@ -17,7 +17,7 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim modding 
 - For Quest/Alias scripts: `OnInit` fires at game startup and whenever the quest starts (due to reset)
 - For other objects (Topic Infos, Perks, persistent refs): `OnInit` fires at first load into the session
 - All properties and variables are reset to default values before `OnInit` fires
-- There is NO `OnLoad` event — use `RegisterForSingleUpdate`/`OnUpdate` or `OnGameReload` for reload detection
+- A quest script has no `OnLoad` event, and `OnLoad` on an ObjectReference means its 3D loaded, not that a save did — use `RegisterForSingleUpdate`/`OnUpdate` or `OnGameReload` for reload detection
 - `OnInit` does NOT fire again after save/load (quest must be reset)
 
 **Persistence and Save/Load:**
@@ -109,7 +109,7 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim modding 
 
 - Hard master dependencies (listed in MAST records) can't always be avoided — they're acceptable when you're overriding or extending a specific mod's content.
 - Soft `GetFormFromFile()` dependencies on other mods are almost always avoidable: copy the WAV/record into your own ESP.
-- **Exception**: `Skyrim.esm` and the game's core master files — always safe to reference by FormID since they're always loaded.
+- **Not an exception**: `Skyrim.esm` and the core masters are always loaded, but another plugin can still override their records. A bare FormID is fine for a marker or anchor; copy any vanilla record whose behaviour your mod relies on.
 
 ### Magic Effect Lifecycle
 
@@ -258,7 +258,7 @@ an unguarded call errors on every tick, and that error storm can degrade the VM 
 **CORRECTED + VERIFIED from reference VR mod (`JudgementCutEnd.esp`):**
 
 - `DisablePlayerControls()` does **NOT** prevent VR controller thumbstick movement. VR controller input (thumbstick/wand movement) is a separate engine-level input system that bypasses the traditional control disable flags. Calling it during a scripted sequence does nothing to stop the player from walking around.
-- **`DisablePlayerControls(True, True, False, False, False, True, True, False, 0)` + `Actor.SetDontMove(True)`** together is the correct approach. `SetDontMove` is the key — `DisablePlayerControls` alone or `SetRestrained` alone do not stop VR movement. Source: decompiled `EndMagicEndScript.pex` from `JudgementCutEnd.esp`, confirmed working in VR.
+- **`DisablePlayerControls(True, True, False, False, False, True, True, False, 0)` + `Actor.SetDontMove(True)`** together is the correct approach (the second argument, abFighting, sheathes a drawn weapon: see VR Weapon Draw State). `SetDontMove` is the key — `DisablePlayerControls` alone or `SetRestrained` alone do not stop VR movement. Source: decompiled `EndMagicEndScript.pex` from `JudgementCutEnd.esp`, confirmed working in VR.
 - **`Actor.SetRestrained(true)`** was tried but also NOT effective for VR movement. It operates at the actor level (not the input level), intercepting movement before the VR input reaches the character. Per CK wiki: "disables player movement, camera switching and camera rotating." Confidence: 85% (tested in VR context).
 - `Game.SetPlayerAIDriven(true)` can be combined for belt-and-suspenders — overrides player control with AI behavior.
 - Over-encumbrance (adding heavy items / reducing carry weight) only slows to walk speed — does NOT prevent movement.
@@ -391,7 +391,7 @@ game closed, and confirm the change from the mod's own log line, not from the fi
 
 ### XEditLib.dll (Delphi FFI)
 
-- See CLAUDE.md for the full list of quirks (UCS-2 strings, void Init/Close, uint16 WordBool, GetResultString pattern).
+- See the `xelib` skill for the full list of quirks (UCS-2 strings, void Init/Close, uint16 WordBool, GetResultString pattern).
 - Game mode: always use `GM_SSE` (4) for both Skyrim SE and Skyrim VR.
 - Registry: reads from `Skyrim Special Edition` key, not `Skyrim VR`.
 
@@ -713,7 +713,7 @@ not a change. Verify a round trip by parsing the properties (names, types, value
   the drift audit a `dotnet tool update` on an SDK 6/8/9 machine failed with
   "DotnetToolSettings.xml was not found". 0.40.0 targeted net9.0. `tools/toolchain-check.sh`
   compares `spriggit --version` with the pin in `.config/dotnet-tools.json` (older or newer is
-  a MISMATCH) and requires SDK 10+ for 0.41+, SDK 9+ before that.
+  a MISMATCH) and requires exactly SDK major 10 for 0.41+, SDK 9 before that.
 - **`spriggit --version` exits 1 even when it works** (MEASURED 2026-10-05, 0.41.0, global tool and
   `dotnet tool run spriggit` alike): it prints `Spriggit version 0.41.0+...`, a stray `--version`, and
   `Spriggit.CLI 0.41.0+...`, then returns 1. Probe it by its OUTPUT, never its exit status, and not with
@@ -890,7 +890,7 @@ This gives the horizontal direction from body center to sword hand — accurate 
 
 ### VR Weapon Draw State
 - **`DisablePlayerControls(abFighting=true)` causes weapon to sheathe** when `EnablePlayerControls` is called afterward. The engine resets weapon drawn state when the fighting control flag is toggled.
-- To freeze the player while preserving weapon drawn state, use: `DisablePlayerControls(true, false, false, false, false, false, true, false, 0)` — disables movement and menu, but NOT fighting. Combined with `SetDontMove(true)` for VR thumbstick freeze.
+- To freeze the player while preserving weapon drawn state, use: `DisablePlayerControls(true, false, false, false, false, false, true, false, 0)` — disables movement and activation, but NOT fighting. Combined with `SetDontMove(true)` for VR thumbstick freeze.
 
 
 ### Reach Formula (Vanilla, without Precision)
@@ -1550,7 +1550,7 @@ using `Archetype` silently matches nothing.
 
 ### WAV → XWM audio pipeline (for SNDR sound files)
 
-AutoMod `audio wav-to-xwm` needs `xWMAEncode.exe` (present at `src/xWMAEncode.exe`); it requires an
+AutoMod `audio wav-to-xwm` needs `xWMAEncode.exe` (not bundled); it requires an
 `-o` output path. xWMAEncode only accepts **1, 2, or 6** channels and PCM input — multichannel sources
 (e.g. a 7.1.4 WAV) fail with `XWMA_E_UNSUPPORTED_CHANNELS`. Normalize first with ffmpeg, then encode:
 ```bash
@@ -1565,7 +1565,7 @@ Spriggit lays records out as per-record YAML in typed folders: SNDR → `SoundDe
 `SoundMarkers/`, named `<EditorID> - <FormID>_<Plugin>.yaml`. To add a sound: serialize, clone an
 existing SNDR (set `SoundFiles: [FX\...\file.xwm]`) + SOUN (set `SoundDescriptor:` to the new SNDR),
 deserialize.
-- **Spriggit is on PATH directly as `spriggit`** here (NOT `dotnet tool run spriggit`).
+- **The global tool answers as `spriggit`; the local one as `dotnet tool run spriggit`** (both are supported, above).
 - **CRITICAL gotcha**: the Write tool's `/tmp` and Bash's `/tmp` resolve to **different** locations on
   this Windows setup — files Written to `/tmp/...` are invisible to a Bash/Spriggit `/tmp/...` read, so
   the new records silently never deserialize. Use an **explicit absolute path** (e.g. a dedicated `spriggit-tmp/` dir OUTSIDE `/tmp`) for the serialize OutputPath *and* the Write paths so both tools agree.
@@ -1726,7 +1726,7 @@ before your first live session — several of these cost a force-killed game to 
   for `None` (#129) and forms behind custom scripts (#128) (1.28); injected keys carry an empty user event (1.28, #127).
   CommonLibSSE-NG was not bumped in 1.25-1.28 (the Address Library note below still holds).
 - **Update the VR Address Library first.** DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0. Newest VR
-  Address Library seen: **0.276.1** (2026-10-04).
+  Address Library seen: **0.279.0**.
 - New: `game loadLast` / `advanceTime` (1.17) / `setTimeScale` / `getTimeScale` (1.22, 0.1..3.0, leased, 409
   while recording); `wait` and `sleep` (1.16); `input` (1.18-1.24, synthetic keyboard/VR tracked-pose, mutating);
   `camera orbit` (third person only, 501 on VR); `inspect kind=extensions`; `menu invoke`; `devbench-bridge`
