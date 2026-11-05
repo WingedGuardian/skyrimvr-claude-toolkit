@@ -368,6 +368,19 @@ def operands(e) -> Optional[List[Optional[str]]]:
     return words
 
 
+_CP_TARGET = re.compile(r"-[abdfHiLlnPpRrsTuvxZ]*t(.*)")       # -S takes a value, so `-St` is a suffix and no target
+
+
+def _cp_target_option(w):
+    """(does this word name cp's or mv's target folder, its value when it is in the same word): `-t x`, `-tx`, `-vt x`,
+    and any shortened `--target-directory`, which GNU options accept."""
+    head, eq, value = w.partition("=")
+    if len(head) >= 3 and "--target-directory".startswith(head):
+        return True, value if eq else None
+    m = _CP_TARGET.fullmatch(w)
+    return (True, m.group(1) or None) if m else (False, None)
+
+
 def _python_interface(argv, launcher=False):
     """Select Python's first -c program, never subsequent program arguments.
 
@@ -384,7 +397,7 @@ def _python_interface(argv, launcher=False):
             return None
         if not word.startswith('-'):
             return None                                # script/zip/directory and everything after it
-        if launcher and word.startswith('-V:'):
+        if launcher and i == 0 and re.match(r'-(?:[0-9]|V:)', word):
             i += 1
             continue
         if word == '--check-hash-based-pycs':
@@ -803,11 +816,12 @@ def _move_pairs(e) -> List[Tuple[str, str]]:
         target, words, k = None, [], 0
         while k < len(argv):
             w = argv[k]
-            if w in ("-t", "--target-directory") and k + 1 < len(argv):
+            names_target, joined = _cp_target_option(w)
+            if names_target and joined is None and k + 1 < len(argv):
                 target, k = argv[k + 1], k + 2
                 continue
-            if w.startswith("--target-directory="):
-                target = w.split("=", 1)[1]
+            if names_target:
+                target = joined
             elif w in ("-S", "--suffix") and k + 1 < len(argv):
                 k += 1
             elif w == "--":

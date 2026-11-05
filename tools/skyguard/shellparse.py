@@ -3526,14 +3526,17 @@ def _ps_reads_commands(e: Exec) -> bool:
 def python_options(argv):
     """(python's own one-letter options, where its program comes from: "stdin", "file" or "code"), read as python reads
     them: options cluster (`-bW ignore`, `-uX utf8`), -W and -X take the rest of the word or the next one, and -c and -m
-    end the options. The one reading for every question about a python command line."""
+    end the options. The `py` launcher's own first word (`-3.12-arm64`, `-V:Company/Tag`) is no option of python's."""
     seen, k = set(), 0
     while k < len(argv):
         w = argv[k]
+        if k == 0 and re.match(r"-(?:[0-9]|V:)", w):
+            k += 1
+            continue
         if w == "-":
             return seen, "stdin"
         if w == "--":
-            return seen, "file" if k + 1 < len(argv) else "stdin"
+            return seen, "file" if tuple(argv[k + 1:k + 2]) not in ((), ("-",)) else "stdin"
         if not w.startswith("-"):
             return seen, "file"
         if w.startswith("--"):

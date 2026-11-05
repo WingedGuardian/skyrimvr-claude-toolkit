@@ -263,7 +263,7 @@ def test_mv_moves_a_save_out_with_a_target_option(world):
     assert judge(world, "mv --target=/elsewhere '<C>/Saves/main.ess'", os.path.dirname(world[0]))[1] & {"S-SAVE-BACKUP", "S-DEL-CONFIG", "S-SAVE-APPROVAL"}
 
 
-@pytest.mark.parametrize("options", ["-E", "-uX utf8", "-bW ignore", "--check-hash-based-pycs always", "-I -", "-- "])
+@pytest.mark.parametrize("options", ["-E", "-uX utf8", "-bW ignore", "--check-hash-based-pycs always", "-I -", "-- ", "-- -"])
 def test_every_python_option_spelling_still_reads_its_program_from_a_pipe(world, options):
     assert judge(world, """echo "import os; os.remove('Data/x.esp')" | python {}""".format(options))[0] == "deny"
 
@@ -290,3 +290,31 @@ def test_a_named_script_with_wignore_gets_its_input_as_data(world):
 ])
 def test_a_star_import_or_a_set_of_saves_is_read(world, code):
     assert judge(world, 'python -c "{}"'.format(code))[1] & {"S-SAVE-BACKUP", "S-DEL-CONFIG"}
+
+
+@pytest.mark.parametrize("program", ["py -3.12-arm64", "py -V:Company/Tag -", "py -3.12 -", "py -3 -- -"])
+def test_a_launcher_tag_is_no_python_option(world, program):
+    assert judge(world, """echo "import os; os.remove('Data/x.esp')" | {}""".format(program))[0] == "deny"
+
+
+def test_a_launcher_tag_does_not_hide_a_c_program(world):
+    assert judge(world, """py -3.12-arm64 -c "import os; os.remove('<I>/Data/x.esp')" """)[0] == "deny"
+
+
+def test_a_script_after_the_double_dash_gets_its_input_as_data():
+    assert shellparse.python_options(["--", "tool.py"])[1] == "file"
+    assert shellparse.python_options(["--"])[1] == "stdin"
+
+
+@pytest.mark.parametrize("command", [
+    "mv -ft /elsewhere '<I>/Data/x.bsa'", "mv --target=/elsewhere '<I>/Data/Skyrim.esm'", "mv -t/elsewhere '<I>/Data/x.bsa'",
+    "mv --target /elsewhere '<I>/Data/x.bsa'",
+])
+def test_every_spelling_of_mv_target_takes_the_source_away(world, command):
+    assert judge(world, command)[0] == "deny"
+
+
+def test_a_save_moved_in_by_any_target_spelling_is_a_backup_not_a_refusal(world):
+    plain = judge(world, "mv -t '<C>/Saves' x/main.ess", os.path.dirname(world[0]))
+    assert judge(world, "mv -vt '<C>/Saves' x/main.ess", os.path.dirname(world[0])) == plain
+    assert plain[0] != "deny"

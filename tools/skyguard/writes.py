@@ -76,7 +76,7 @@ from pathlib import Path
 from typing import List, Mapping, NamedTuple, Optional, Tuple
 
 from . import paths, shellparse, targets
-from .deletes import _plain_operands, interpreter_code, python_nodes, robocopy_positionals, substituted
+from .deletes import _cp_target_option, _plain_operands, interpreter_code, python_nodes, robocopy_positionals, substituted
 from .grep import _compile
 from .shellparse import ps_param
 
@@ -95,17 +95,6 @@ _CMD_SWITCH = re.compile(r"/{1,2}[A-Za-z?\-]+(:\S*)?")      # `//E`: how Git Bas
 _SED_INPLACE = re.compile(r"-[nrEsuzb]*i\S*|--in-place(=\S*)?")    # P8-SED: `-bi` is in-place too
 _SED_VALUED = frozenset(("-e", "-f", "-l", "--expression", "--file", "--line-length"))
 _CP_VALUED = frozenset(("-S", "--suffix", "-t", "--target-directory"))
-_CP_TARGET = re.compile(r"-[abdfHiLlnPpRrsTuvxZ]*t(.*)")       # -S takes a value, so `-St` is a suffix and no target
-
-
-def _cp_target_option(w):
-    """(does this word name cp's or mv's target folder, its value when it is in the same word): `-t x`, `-tx`, `-vt x`,
-    and any shortened `--target-directory`, which GNU options accept."""
-    head, eq, value = w.partition("=")
-    if len(head) >= 3 and "--target-directory".startswith(head):
-        return True, value if eq else None
-    m = _CP_TARGET.fullmatch(w)
-    return (True, m.group(1) or None) if m else (False, None)
 
 
 def _redirect_targets(e) -> List[str]:
