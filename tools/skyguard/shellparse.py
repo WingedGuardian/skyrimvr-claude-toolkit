@@ -3555,9 +3555,11 @@ def python_options(argv):
 
 def _reads_code(argv, python: bool = True) -> bool:
     """Whether an interpreter takes its PROGRAM from stdin (`python`, `python -`, `node`), rather than from -c/-e
-    or a script file (then stdin is data). `python -X utf8` names no script; `perl -W tool.pl` does."""
+    or a script file (then stdin is data). `python -X utf8` names no script; `perl -W tool.pl` does. `python -i tool.py`
+    runs the script, then reads what is left on stdin as its next program."""
     if python:
-        return python_options(argv)[1] == "stdin"
+        seen, program = python_options(argv)
+        return program == "stdin" or "i" in seen
     for a in argv:
         if a in _CODE_OPTS:
             return False
