@@ -111,7 +111,7 @@ if [ -n "$LOCAL_ZIP" ]; then
   ZIP="$LOCAL_ZIP"
   ok "local zip $(basename "$ZIP")"
 else
-  if ! gh release download "$TAG" -R "${TOOLKIT_REPO:-WingedGuardian/skyrimvr-claude-toolkit}" -p '*.zip' >/dev/null 2>&1; then
+  if ! gh release download "$TAG" -R "${TOOLKIT_REPO:-WingedGuardian/skyrim-ai-assistant-toolkit}" -p '*.zip' >/dev/null 2>&1; then
     bad "download the release zip" "gh release download failed"
     echo "RESULT: FAILED"; exit 1
   fi

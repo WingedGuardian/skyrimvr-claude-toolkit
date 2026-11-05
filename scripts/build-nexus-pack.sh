@@ -74,7 +74,7 @@ printf 'pack home: %s\n' "$DEST"
 # --- 1. the bundle, from the published release -------------------------------
 if [ ! -f "$DEST/$ZIP_NAME" ]; then
     printf 'downloading %s from release %s...\n' "$ZIP_NAME" "$TAG"
-    gh release download "$TAG" --repo WingedGuardian/skyrimvr-claude-toolkit \
+    gh release download "$TAG" --repo WingedGuardian/skyrim-ai-assistant-toolkit \
         --pattern '*.zip' --dir "$DEST" --clobber \
         || die "gh release download failed for $TAG (is the release published?)"
 fi
@@ -130,7 +130,7 @@ fi
     printf 'asset         %s\n' "$ZIP_NAME"
     printf 'sha256        %s\n' "$SHA"
     printf 'size_bytes    %s\n' "$SIZE"
-    printf 'source        https://github.com/WingedGuardian/skyrimvr-claude-toolkit/releases/tag/%s\n' "$TAG"
+    printf 'source        https://github.com/WingedGuardian/skyrim-ai-assistant-toolkit/releases/tag/%s\n' "$TAG"
     printf 'packed_utc    %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "$DEST/RELEASE-MANIFEST.txt"
 

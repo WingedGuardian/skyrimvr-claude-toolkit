@@ -188,7 +188,7 @@
 - **Knowledgebase snapshots:** include AGENTS.md.
 - **Lift expiry:** the next hooked tool call after expiry relocks the affected files.
 - **Archive identity:** the root is `skyrim-ai-assistant-toolkit-<version>`, using the package name as the shared slug.
-- **GitHub links:** retain the current repository path; no remote rename is part of this change.
+- **GitHub repository:** renamed to `skyrim-ai-assistant-toolkit` at this release. Old links redirect.
 - **Shipped identity scrub:** examples use neutral paths; the measurements shipped docs cite are in `docs/evidence/`, scrubbed of the maintainer's machine details.
 - **Corpus fixture bytes:** non-shipped corpus fixtures preserve historical input bytes.
 - **Freeze baseline:** a tag on HEAD cannot serve as its own comparison baseline.

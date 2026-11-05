@@ -85,7 +85,7 @@ retain upstream notices about those requirements before using a plugin in game.
 
 ## Archive discovery coverage
 
-[Issue 11](https://github.com/WingedGuardian/skyrimvr-claude-toolkit/issues/11) reported asset-absence
+[Issue 11](https://github.com/WingedGuardian/skyrim-ai-assistant-toolkit/issues/11) reported asset-absence
 results without a coverage warning when base archives were omitted. The pinned backend reads the
 whole first `Skyrim.ini` that lists archives, profile folder before game folder, and never merges
 files. The gateway writes that profile `Skyrim.ini` itself, so the backend reads exactly the lists

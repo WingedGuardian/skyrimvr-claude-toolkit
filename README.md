@@ -632,7 +632,7 @@ manual.
 
 ## Contributing
 
-Found a new Skyrim quirk? PRs welcome on [GitHub](https://github.com/WingedGuardian/skyrimvr-claude-toolkit) -- especially additions to `KNOWLEDGEBASE.md`.
+Found a new Skyrim quirk? PRs welcome on [GitHub](https://github.com/WingedGuardian/skyrim-ai-assistant-toolkit) -- especially additions to `KNOWLEDGEBASE.md`.
 
 ### Editing CLAUDE.md, skills, hooks or settings
 

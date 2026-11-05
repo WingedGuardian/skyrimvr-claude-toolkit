@@ -43,7 +43,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from modding_harness import discovery
 
-UA = "skyrim-ai-assistant-toolkit-nexus/1 (+https://github.com/WingedGuardian/skyrimvr-claude-toolkit)"
+UA = "skyrim-ai-assistant-toolkit-nexus/1 (+https://github.com/WingedGuardian/skyrim-ai-assistant-toolkit)"
 GAME_IDS = {"skyrimspecialedition": 1704}   # GraphQL v2 takes a numeric game id for requirements
 KEYWORDS = re.compile(r"(?i)\b(new game|existing saves?|mid[- ]?(?:save|playthrough)|clean save|uninstall\w*|"
                       r"ESL|ESPFE|VR|Skyrim ?VR|requires?|requirements|incompatib\w+|patch(?:es)?)\b")
