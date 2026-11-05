@@ -31,7 +31,7 @@ release, not v4.0.0. Usage, limits and evidence are in `native/README.md`; this 
 | SDK from an empty folder, locally and on GitHub | Builds, verifies, link-qualifies |
 | Native bridge, hook and gate tests | Pass, locally and on GitHub |
 | Test context | 120 tests, 92 mutants, three independent review passes |
-| Whole mutation set | See the CI run on the head named in the merge request |
+| Whole mutation set | 156 mutants, 0 survivors: native CI run 41972847237, green on `ff51fc9` |
 | Real game, one site | 44,102 paired calls at `A27730`, clean exit, 287 files restored and independently re-hashed |
 
 Real-game limits are listed in `native/README.md`: one site, one session, headless, overhead unmeasured.
