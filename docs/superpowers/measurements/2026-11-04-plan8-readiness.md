@@ -33,7 +33,7 @@ medium findings were addressed. A final independent review of `9190266..1ab431b`
   `-Wignore`, `mod-install`'s plan misreporting a replaced file, a missing test and twins.
 - Low, reported instead: a hand-corrected MO2 profile path from 3.x still lasts one setup run; setup now says so.
 
-The commit fixing these has had no independent review of its own. The priced decisions did not move.
+An independent review of the commits fixing these (`2128529..531c63a`) found 1 medium and 2 low regressions plus older gaps; all were reproduced and fixed in the commit that dates the CHANGELOG. Pricing that commit against `531c63a` over 116,311 real calls moved no decision.
 
 ## Not run, by the user's ruling of 2026-11-04 ("no need for any of the tests")
 

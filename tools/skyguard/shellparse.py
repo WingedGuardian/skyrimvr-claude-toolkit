@@ -3523,21 +3523,45 @@ def _ps_reads_commands(e: Exec) -> bool:
     return e.program == "invoke-expression" and e.dialect == "powershell" and not e.argv
 
 
+def python_options(argv):
+    """(python's own one-letter options, where its program comes from: "stdin", "file" or "code"), read as python reads
+    them: options cluster (`-bW ignore`, `-uX utf8`), -W and -X take the rest of the word or the next one, and -c and -m
+    end the options. The one reading for every question about a python command line."""
+    seen, k = set(), 0
+    while k < len(argv):
+        w = argv[k]
+        if w == "-":
+            return seen, "stdin"
+        if w == "--":
+            return seen, "file" if k + 1 < len(argv) else "stdin"
+        if not w.startswith("-"):
+            return seen, "file"
+        if w.startswith("--"):
+            k += 2 if w == "--check-hash-based-pycs" else 1
+            continue
+        for j, c in enumerate(w[1:], 2):
+            if c in "cm":
+                return seen, "code"
+            if c in "WX":
+                k += 0 if j < len(w) else 1
+                break
+            seen.add(c)
+        k += 1
+    return seen, "stdin"
+
+
 def _reads_code(argv, python: bool = True) -> bool:
     """Whether an interpreter takes its PROGRAM from stdin (`python`, `python -`, `node`), rather than from -c/-e
-    or a script file (then stdin is data). Only python's -X and -W take a value."""
-    skip = False
+    or a script file (then stdin is data). `python -X utf8` names no script; `perl -W tool.pl` does."""
+    if python:
+        return python_options(argv)[1] == "stdin"
     for a in argv:
         if a in _CODE_OPTS:
             return False
-        if skip:                                    # `python -X utf8` names no script; `perl -W tool.pl` does
-            skip = False
-            continue
         if a == "-":
             return True
         if not a.startswith("-"):
             return False
-        skip = python and a in ("-X", "-W", "--check-hash-based-pycs")
     return True
 _SCANNERS = {"bash": _Bash, "powershell": _Pwsh, "cmd": _Cmdexe}
 

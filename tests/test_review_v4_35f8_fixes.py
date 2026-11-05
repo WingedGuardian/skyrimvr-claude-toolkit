@@ -212,3 +212,81 @@ def test_only_pythons_own_i_counts(argv, want):
 
 def test_wignore_is_not_pythons_i_for_code_the_guard_cannot_parse(world):
     assert judge(world, """python -Wignore -c "print(f'{'a':<16}')" """, os.path.dirname(world[0]))[0] == "allow"
+
+
+# ---- the independent review of the final fixes
+
+@pytest.mark.parametrize("command", [
+    "cp --parents Saves/MAIN.ESS '<C>/'", "cp --parents Saves/Main.Skse '<C>/'", "rsync -R Saves/MAIN.ESS '<C>/'",
+])
+def test_a_kept_folder_save_of_any_case_needs_the_approval(world, command):
+    assert judge(world, command, os.path.dirname(world[0]))[1] == {"S-SAVE-APPROVAL"}
+
+
+@pytest.mark.parametrize("command", [
+    "rsync -P main.ess '<C>/Saves/'", "rsync -i main.ess '<C>/Saves/'", "rsync -l main.ess '<C>/Saves/'",
+])
+def test_a_switch_of_rsync_is_not_an_option_value(world, command):
+    decision, fired = judge(world, command, os.path.dirname(world[0]))
+    assert "S-SAVE-BACKUP" in fired and "S-SAVE-APPROVAL" not in fired, (decision, fired)
+
+
+def test_an_scp_option_value_is_not_a_source(world):
+    assert judge(world, "scp -P 22 a.ini '<C>/'", os.path.dirname(world[0]))[1].isdisjoint({"S-SAVE-APPROVAL"})
+
+
+def test_an_rsync_exclude_value_is_not_a_source(world):
+    assert "S-SAVE-APPROVAL" not in judge(world, "rsync --exclude .git/ -R a.ini '<C>/'", os.path.dirname(world[0]))[1]
+
+
+@pytest.mark.parametrize("command", [
+    "cp -vt '<C>/Saves' main.ess", "cp --target='<C>/Saves' x/main.ess", "cp --t '<C>/Saves' main.ess",
+    "mv --target='<C>/Saves' x/main.ess",
+])
+def test_every_spelling_of_cps_target_folder_is_read(world, command):
+    assert judge(world, command, os.path.dirname(world[0]))[1] & {"S-SAVE-BACKUP", "S-SAVE-APPROVAL"}
+
+
+@pytest.mark.parametrize("command", ["cp --parents --target='<C>' Saves/main.ess", "cp --parents -vt '<C>' Saves/main.ess"])
+def test_every_spelling_of_cps_target_folder_keeps_the_approval_with_parents(world, command):
+    assert judge(world, command, os.path.dirname(world[0]))[1] == {"S-SAVE-APPROVAL"}
+
+
+def test_a_cp_suffix_value_is_no_target():
+    assert writes._cp_target_option("-St") == (False, None)
+    assert writes._cp_target_option("--suffix") == (False, None)
+    assert writes._cp_target_option("--target-directory=x") == (True, "x")
+    assert writes._cp_target_option("-vtx") == (True, "x")
+
+
+def test_mv_moves_a_save_out_with_a_target_option(world):
+    assert judge(world, "mv --target=/elsewhere '<C>/Saves/main.ess'", os.path.dirname(world[0]))[1] & {"S-SAVE-BACKUP", "S-DEL-CONFIG", "S-SAVE-APPROVAL"}
+
+
+@pytest.mark.parametrize("options", ["-E", "-uX utf8", "-bW ignore", "--check-hash-based-pycs always", "-I -", "-- "])
+def test_every_python_option_spelling_still_reads_its_program_from_a_pipe(world, options):
+    assert judge(world, """echo "import os; os.remove('Data/x.esp')" | python {}""".format(options))[0] == "deny"
+
+
+@pytest.mark.parametrize("argv, want", [
+    ([], ("stdin", set())), (["-"], ("stdin", set())), (["tool.py", "-i"], ("file", set())), (["-c", "x", "-i"], ("code", set())),
+    (["-m", "x"], ("code", set())), (["-xi"], ("stdin", {"x", "i"})), (["-bW", "ignore", "-i"], ("stdin", {"b", "i"})),
+    (["-Wignore", "tool.py"], ("file", set())), (["-X", "utf8", "tool.py"], ("file", set())), (["--", "tool.py"], ("file", set())),
+    (["--check-hash-based-pycs", "always", "-i"], ("stdin", {"i"})), (["-ic", "x"], ("code", {"i"})),
+])
+def test_python_options_reads_as_python_does(argv, want):
+    seen, program = shellparse.python_options(argv)
+    assert (program, seen) == want
+
+
+def test_a_named_script_with_wignore_gets_its_input_as_data(world):
+    assert judge(world, "python -Wignore tool.py <<'EOF'\nnot python at open(p, m)\nEOF", os.path.dirname(world[0]))[0] == "allow"
+
+
+@pytest.mark.parametrize("code", [
+    "from os import *; remove('<C>/Saves/main.ess')",
+    "from send2trash import *; send2trash('<C>/Saves/main.ess')",
+    "import send2trash; send2trash.send2trash({'<C>/Saves/main.ess'})",
+])
+def test_a_star_import_or_a_set_of_saves_is_read(world, code):
+    assert judge(world, 'python -c "{}"'.format(code))[1] & {"S-SAVE-BACKUP", "S-DEL-CONFIG"}

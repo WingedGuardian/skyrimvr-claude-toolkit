@@ -95,6 +95,17 @@ _CMD_SWITCH = re.compile(r"/{1,2}[A-Za-z?\-]+(:\S*)?")      # `//E`: how Git Bas
 _SED_INPLACE = re.compile(r"-[nrEsuzb]*i\S*|--in-place(=\S*)?")    # P8-SED: `-bi` is in-place too
 _SED_VALUED = frozenset(("-e", "-f", "-l", "--expression", "--file", "--line-length"))
 _CP_VALUED = frozenset(("-S", "--suffix", "-t", "--target-directory"))
+_CP_TARGET = re.compile(r"-[abdfHiLlnPpRrsTuvxZ]*t(.*)")       # -S takes a value, so `-St` is a suffix and no target
+
+
+def _cp_target_option(w):
+    """(does this word name cp's or mv's target folder, its value when it is in the same word): `-t x`, `-tx`, `-vt x`,
+    and any shortened `--target-directory`, which GNU options accept."""
+    head, eq, value = w.partition("=")
+    if len(head) >= 3 and "--target-directory".startswith(head):
+        return True, value if eq else None
+    m = _CP_TARGET.fullmatch(w)
+    return (True, m.group(1) or None) if m else (False, None)
 
 
 def _redirect_targets(e) -> List[str]:
@@ -362,7 +373,10 @@ def tool_write_targets(e) -> List[str]:
 
 
 _RSYNC_VALUED = ("--exclude", "--include", "--filter", "-f", "-e", "--rsh", "--files-from", "--exclude-from", "--include-from",
-                 "--link-dest", "--compare-dest", "-P", "-i", "-o", "-F", "-l")
+                 "--link-dest", "--compare-dest", "--copy-dest", "-T", "--temp-dir", "-B", "--block-size", "--backup-dir",
+                 "--partial-dir", "--suffix", "--log-file", "--password-file", "--port", "--bwlimit", "--timeout",
+                 "--max-size", "--min-size", "--rsync-path", "--chmod", "--chown")
+_SCP_VALUED = ("-P", "-i", "-o", "-F", "-l", "-c", "-J", "-S", "-D", "-X")     # to rsync, -P -i -o -F -l are plain switches
 
 
 def _plain_operands_valued(argv, valued) -> List[str]:
@@ -376,6 +390,10 @@ def _plain_operands_valued(argv, valued) -> List[str]:
             out.append(w)
         k += 1
     return out
+
+
+def _remote_copy_operands(e) -> List[str]:
+    return _plain_operands_valued(e.argv, _SCP_VALUED if e.program == "scp" else _RSYNC_VALUED)
 
 
 def _perl_code_given(argv) -> bool:
@@ -439,6 +457,8 @@ _READ_ONLY_IMPORTS = frozenset((
     "enum", "fnmatch", "fractions", "functools", "glob", "hashlib", "html", "itertools", "json", "locale", "math",
     "os", "os.path", "pathlib", "platform", "pprint", "random", "re", "statistics", "string", "struct",
     "sys", "textwrap", "time", "typing", "unicodedata", "xml.etree", "xml.etree.ElementTree"))
+_STAR_NAMES = {"os": ("remove", "unlink", "rename", "renames", "replace", "truncate"),
+               "shutil": ("move", "copy", "copy2", "copyfile", "copytree"), "send2trash": ("send2trash",)}
 _READ_OPEN = re.compile(
     r"""(?<![.\w])open\(\s*(?:[rRbBuU]{0,2}"[^"\n]*"|[rRbBuU]{0,2}'[^'\n]*'|[\w.\[\]]+)\s*"""
     r"""(?:,\s*(?:mode\s*=\s*)?['"](?:r|rb|rt|br|tr)['"])?\s*"""
@@ -488,21 +508,7 @@ def _names_a_change(text: str) -> bool:
 
 def _python_option_i(argv) -> bool:
     """-i among python's own options: not inside -Wignore, not past the program it runs."""
-    skip = False
-    for w in argv:
-        if skip:
-            skip = False
-            continue
-        if w in ("-W", "-X"):
-            skip = True
-            continue
-        if w == "-" or not w.startswith("-"):
-            return False
-        if re.fullmatch(r"-[bBdEIOPqRsSuv]*i[A-Za-z]*", w):
-            return True
-        if re.match(r"-[bBdEIOPqRsSuv]*[cm]", w):
-            return False
-    return False
+    return "i" in shellparse.python_options(argv)[0]
 
 
 def _runs_past_a_syntax_error(e, code: str) -> bool:
@@ -550,6 +556,8 @@ def _python_write_targets(code: str) -> List[str]:
             modules.update({a.asname or a.name: a.name for a in node.names})
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             names.update({a.asname or a.name: node.module + "." + a.name for a in node.names})
+            if any(a.name == "*" for a in node.names):        # `from os import *` brings these in by their own names
+                names.update({n: node.module + "." + n for n in _STAR_NAMES.get(node.module, ())})
 
     def path_argument(node):
         if not isinstance(node, ast.Call) or not node.args or node.keywords:
@@ -599,7 +607,7 @@ def _python_write_targets(code: str) -> List[str]:
         if name in ("os.remove", "os.unlink", "send2trash.send2trash"):
             given = {k.arg: k.value for k in node.keywords}
             first = node.args[0] if node.args else given.get("path", given.get("paths"))
-            items = first.elts if isinstance(first, (ast.List, ast.Tuple)) else [first] if first is not None else []
+            items = first.elts if isinstance(first, (ast.List, ast.Tuple, ast.Set)) else [first] if first is not None else []
             words = [w for w in (literal(i) or path_argument(i) for i in items) if w]
             if words:
                 out += [_CopyWord(w, moved=True, removed=True) for w in words]   # read for saves; deletes.py has the rest
@@ -627,19 +635,10 @@ def text_write_targets(code: str, *, python_literals: bool = False) -> List[str]
 
 def _script_reads_stdin(e, command: str) -> bool:
     """`python tool.py <<EOF` hands the body to a named script as data: it is code only with -i, or for `python -`."""
-    if not shellparse._PYTHON.fullmatch(e.program) or not e.stdin_body or "-" in e.argv:
+    if not shellparse._PYTHON.fullmatch(e.program) or not e.stdin_body:
         return False
-    if any(re.fullmatch(r"-[A-Za-z]*i[A-Za-z]*", w) for w in e.argv) or "PYTHONINSPECT" in command:
-        return False
-    k = 0
-    while k < len(e.argv):                 # past an option's value: `python -X utf8 <<EOF` names no script
-        if e.argv[k] in ("-X", "-W", "--check-hash-based-pycs"):
-            k += 2
-        elif e.argv[k].startswith("-"):
-            k += 1
-        else:
-            return True
-    return False
+    seen, program = shellparse.python_options(e.argv)      # `python -X utf8 <<EOF` names no script
+    return "i" not in seen and "PYTHONINSPECT" not in command and program != "stdin"
 
 
 def _unplaced_save(word: str) -> bool:
@@ -690,15 +689,16 @@ def copy_targets(e) -> List[Tuple[str, Tuple[str, ...]]]:
         target, words, k = None, [], 0
         while k < len(argv):
             w = argv[k]
-            if w in ("-t", "--target-directory") and k + 1 < len(argv) and p != "rsync":
+            names_target, joined = _cp_target_option(w) if p in ("cp", "mv") else (False, None)
+            if (w in ("-t", "--target-directory") or (names_target and joined is None)) and k + 1 < len(argv) and p != "rsync":
                 target = argv[k + 1]
                 k += 2
                 continue
-            if w.startswith("--target-directory="):
+            if names_target and joined is not None:
+                target = joined
+            elif w.startswith("--target-directory="):
                 target = w.split("=", 1)[1]
-            elif p in ("cp", "mv") and re.fullmatch(r"-t.+", w):
-                target = w[2:]
-            elif (w in _CP_VALUED and not (p == "rsync" and w == "-t")) or (p == "rsync" and w in ("-e", "--rsh")):
+            elif w in (_RSYNC_VALUED if p == "rsync" else _CP_VALUED):
                 k += 2
                 continue
             elif w == "--":
@@ -884,7 +884,7 @@ def _keeps_source_folders(e) -> bool:
     if not relative:
         return False
     sources = [s for _, words in copy_targets(e) for s in words]
-    return any("/" in s.replace("\\", "/") and (_name(s).endswith(SAVE_EXTS) or _may_bring_saves(s)) for s in sources)
+    return any("/" in s.replace("\\", "/") and (_name(s).lower().endswith(SAVE_EXTS) or _may_bring_saves(s)) for s in sources)
 
 
 def _may_bring_saves(source: str) -> bool:
@@ -912,7 +912,7 @@ def bulk_destinations(e) -> List[str]:
     if p == "expand-archive":
         return (list(ps_param(e, "destinationpath", 1, before=(("path", "literalpath"),))) or ["."])[:1]
     if p in ("rsync", "scp"):
-        return _plain_operands_valued(argv, _RSYNC_VALUED)[-1:]
+        return _remote_copy_operands(e)[-1:]
     if p == "robocopy":
         pos = robocopy_positionals(argv)
         return [pos[1]] if len(pos) == 2 else []
@@ -1114,7 +1114,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if e.program in ("rsync", "scp") and is_save(a_bulk, roots):
                 saves.append((targets.physical_operand(e, dst, cwd, env) or "", "write"))     # one named save, as cp
             elif is_save_folder(a_bulk, roots):
-                named = _plain_operands_valued(e.argv, _RSYNC_VALUED)[:-1] if e.program in ("rsync", "scp") else []
+                named = _remote_copy_operands(e)[:-1] if e.program in ("rsync", "scp") else []
                 if named and all(s.lower().endswith(SAVE_EXTS) for s in named):
                     physical = targets.physical_operand(e, dst, cwd, env) or ""
                     saves.extend((paths.physical_abs(physical.rstrip("/\\") + "/" + _name(s)) if physical else "", "write")
@@ -1122,7 +1122,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 else:
                     bulk_into_saves(dst)
             elif is_settings_folder(a_bulk, roots) and (
-                    e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _plain_operands_valued(e.argv, _RSYNC_VALUED)[:-1])) and (
+                    e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _remote_copy_operands(e)[:-1])) and (
                     _settings_hold_saves(targets.physical_operand(e, dst, cwd, env))):
                 bulk_into_saves(dst, "/Saves")
         for dst, srcs in copy_targets(e):

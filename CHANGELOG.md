@@ -1,7 +1,12 @@
 # Changelog
 
-## v4.0.0 — unreleased
+## v4.0.0 — 2026-11-05
 
+- Save guard: a save named in capitals (`MAIN.ESS`) is no longer missed by `cp --parents` or `rsync -R`.
+- Save guard: `rsync -P`, `-i` and `-l` are read as rsync's switches, so they no longer hide a source file.
+- Save guard: `cp` and `mv` target folders are read in every spelling, including `-vt` and a shortened `--target`.
+- Save guard: Python's own options are read one way everywhere, including clusters such as `-bW ignore`.
+- Save guard: a Python delete through `from os import *` or a set of paths is read.
 - Python the guard cannot parse (a newer syntax than its own Python) is no longer refused when a scan of its text finds nothing that could change a file or run a program. The scan catches accidents, not deliberately disguised code. Anything else stays refused.
 - Shared preservation core pinned to b86c709: each path resolves once per read-only pass, including the store check in `Dispatcher.pre`; `upgrade-stage` works through a linked parent folder; a failed `upgrade-preview` exits non-zero; a wildcard matching no save says why it is denied.
 - New `find-session` skill: finds the past Claude Code or Codex session where something was discussed, down to the passage, through the shared core's `find_session.py`. The search engine is obra/episodic-memory, installed separately; the skill reports when it is missing and does not install it. Each search updates the index first (summaries off, so indexing asks for no hosted summary; what a search prints goes into the session, and its host sends that to its model, from any project), groups the hits by session, and gives each session's resume command with the directory to run it from. When several sessions match, the agent asks which one you meant instead of guessing.
