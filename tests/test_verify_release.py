@@ -38,7 +38,7 @@ def payload(tmp_path_factory):
     shutil.copytree(REPO / "tools/resaver-plus/additions", root / "tools/resaver-plus/additions",
                     dirs_exist_ok=True)
     for junk in (".github", "scripts/layer2-spike", "scripts/guard-corpus", "docs/superpowers", ".claude/backups", ".superpowers",
-                 ".skyguard"):
+                 ".skyguard", "native"):
         if (root / junk).exists():
             shutil.rmtree(root / junk)
     for junk in (".claude/settings.local.json", ".claude/skyrim-paths.env", "skyrim-paths.env", "KNOWLEDGEBASE.local.md",

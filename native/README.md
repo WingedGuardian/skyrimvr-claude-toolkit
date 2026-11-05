@@ -106,28 +106,37 @@ The profile is JSON and everything in it is explicit; the toolkit ships no paths
 
 | Key | Meaning |
 |---|---|
-| `roots` | Folders under the game, captured whole and put back whole |
+| `roots` | Folders under the game, captured whole and put back whole. Not the game or `Data` itself, and none may hold a save |
 | `cold_processes` | Exact image names that must not be running. Required: without it a running game cannot be seen |
 | `edits` | `{path, old, new}` inside a root. `old` must match exactly once. Bytes are replaced, the file is not reformatted |
 | `additions` | `{source, sha256, target}`. Placed for the run and removed after; refuses to replace a file |
-| `slots` | Optional `{file, lock, keys}`: a shared ownership file. Never stolen; other fields keep their exact bytes |
+| `slots` | Optional `{file, keys}`: a shared ownership file, locked through its `.gateway.lock` sibling. Taken only when empty and never stolen; other fields keep their exact bytes |
 
 What it guarantees, each with a test and a mutant:
 
 - **Refuses before changing anything** on another owner, a named process running, a file some process holds open, a link in
-  scope, an edit that does not match, or an incomplete earlier run.
+  scope, a save in scope, an edit that does not match, or an incomplete earlier run.
+- **One context per game**, held by a small marker file in the game folder while active, whichever `--state` is named.
+  `restore` and `verify` refuse a different game or store from the one prepared.
 - **Stores each distinct content once**, by hash, read-only, in `--store`, whatever the number of runs. No per-run staging copy,
   and no hard links. `--store` and `--state` must be outside the game.
-- **Writes the manifest first.** Any later failure or crash, including one inside `restore`, is undone by running `restore`.
+- **Writes the manifest first.** Any later failure or crash, including one inside `restore`, is undone by running `restore`,
+  and the final receipt keeps what every attempt saw.
 - **Keeps evidence.** Changed files are copied to `<state>/<run>/evidence/changed`, files created in scope go to `created`.
 - **Leaves everything outside `roots` alone**, so an unrelated change survives.
+- **Puts back bytes, times, the read-only attribute, names and folders**, including a file swapped for a folder or the reverse.
+- **Never restores twice.** Once a restore has verified, a later run only finishes its cleanup, so later work is safe.
 - **Holds ownership until a full re-hash passes.** A partial restore reports `verified: false`, exits 1 and stays active.
+- `verify` exits 1 on any difference from the originals. That is expected while a test is active: it shows what a restore
+  would do.
 
 Limits, stated plainly:
 
 - A file held open with full sharing by a process not in `cold_processes` that writes after the check is not seen until restore.
 - `check` passing says only that `prepare` would have started at that moment.
 - `slots` are cooperative: a writer ignoring them is not stopped.
+- The marker and slots are cooperative. Deleting the marker by hand, with no `slots` in the profile, lets a second context start.
+- Root size has no limit: `check` reports the file count and bytes, so read them.
 - Saves are out of scope. Pair protection stays with the save guard and the guarded named-load route.
 - Not yet qualified against a real session: see the status in the handback.
 
