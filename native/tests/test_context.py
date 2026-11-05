@@ -860,6 +860,17 @@ class ReviewFindings(Base):
         self.assertFalse(created.exists())
         self.assertEqual(original.read_bytes(), b"original")
 
+    def test_a_name_lowering_alike_but_distinct_on_disk_is_a_new_file(self):
+        # U+212A KELVIN SIGN lowers to k in Python, but NTFS keeps it a different name from k.
+        original = write(self.game / "Data/N/data/k.db", b"original")
+        self.prepare()
+        created = write(self.game / "Data/N/data/\u212a.db", b"new")
+        self.assertEqual(original.read_bytes(), b"original", "this filesystem would have to keep the two names apart")
+        self.assertEqual(tc.verify(self.game, self.state)["created"], ["Data/N/data/\u212a.db"])
+        self.assertTrue(self.restore()["verified"])
+        self.assertFalse(created.exists())
+        self.assertEqual(original.read_bytes(), b"original")
+
     def test_restore_will_not_delete_through_a_junction(self):
         self.prepare()
         target = self.game / "Data/Plugins/Probe.dll"
