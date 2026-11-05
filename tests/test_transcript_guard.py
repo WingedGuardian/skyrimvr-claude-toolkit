@@ -263,6 +263,13 @@ def test_interpreter_code_writing_the_transcript_is_refused(claude, shape):
     assert got["decision"] == "deny" and "S-SELF-TRANSCRIPT" in got["rules"], got
 
 
+def test_interpreter_code_deleting_the_folder_that_holds_the_transcript_is_refused(claude):
+    _, _, own, _ = claude
+    got = fire(claude, "protect-bash.sh", {"command": "python -c \"import shutil; shutil.rmtree(r'{d}')\"".format(
+        d=own.parent.as_posix())})
+    assert got["decision"] == "deny" and "S-SELF-TRANSCRIPT" in got["rules"], got
+
+
 def test_interpreter_code_writing_a_transcript_hardlink_is_refused(claude, transcript_alias):
     got = fire(claude, "protect-bash.sh", {"command": INTERPRETER_WRITES["python-c-append"].format(
         t=transcript_alias.as_posix())})
