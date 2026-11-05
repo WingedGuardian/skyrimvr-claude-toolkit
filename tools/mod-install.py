@@ -123,6 +123,13 @@ KEPT_CONFIG_SUFFIXES = (".ini", ".toml", ".yaml", ".yml", ".cfg", ".json")
 MOD_DATA_CONFIG = re.compile(r"(?i)(_distr|_kid|_swap|_flm)\.ini$|(^|/)skypatcher/|(^|/)openanimationreplacer/(?!(?:.*/)?user\.json$)")
 
 
+def replace_unedited_mod_data(plan, shipped_before: dict):
+    """The mod's own data as the last install wrote it goes on patching against the new plugin if it stays: replace it."""
+    return [(inner, dest, "OVERWRITE", []) if (action == "CONFIG-NEW" and MOD_DATA_CONFIG.search(inner.replace("\\", "/"))
+                                               and shipped_before.get(str(dest)) == sha(dest)) else (inner, dest, action, notes)
+            for inner, dest, action, notes in plan]
+
+
 def previous_install(manifest: Path) -> dict:
     """{path: sha256} the last install of this mod wrote, from its record; empty when there is none."""
     try:
@@ -337,6 +344,8 @@ def main(argv) -> int:
         return 2
     chosen = [e for e in groups[group] if not any(fnmatch.fnmatch(e[1].lower(), s.lower()) for s in skip)]
     plan = plan_files(chosen, data, game, bool(mods), root_files, overwrite_cfg)
+    if replacing is not None:
+        plan = replace_unedited_mod_data(plan, previous_install(records_dir() / "{}.files.txt".format(name)))
     problem = destination_problem(plan)
     if problem:
         print("ERROR: " + problem + "; nothing was written", file=sys.stderr)
@@ -491,10 +500,6 @@ def install(sevenz, arc, name, group, data: Path, plan, replacing=None) -> int:
         if old_folder is not None:
             header.append("# UPDATE: the previous mod folder {} is kept whole at {}".format(replacing, old_folder))
         shipped_before = previous_install(manifest) if old_folder is not None else {}   # before this run's record replaces it
-        # The mod's own data as the last install wrote it goes on patching against the new plugin if it stays: replace it.
-        todo = [(inner, dest, "OVERWRITE", []) if (action == "CONFIG-NEW" and MOD_DATA_CONFIG.search(inner.replace("\\", "/"))
-                                                   and shipped_before.get(str(dest)) == sha(dest)) else (inner, dest, action, notes)
-                for inner, dest, action, notes in todo]
         planned = ["PLANNED  {}".format(target_of(p)) for p in todo]
         record(header + ["# STATUS: in progress"] + planned, initial=True)
 

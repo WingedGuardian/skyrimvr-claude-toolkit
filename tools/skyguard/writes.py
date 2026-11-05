@@ -361,6 +361,10 @@ def tool_write_targets(e) -> List[str]:
     return []
 
 
+_RSYNC_VALUED = ("--exclude", "--include", "--filter", "-f", "-e", "--rsh", "--files-from", "--exclude-from", "--include-from",
+                 "--link-dest", "--compare-dest", "-P", "-i", "-o", "-F", "-l")
+
+
 def _plain_operands_valued(argv, valued) -> List[str]:
     out, k = [], 0
     while k < len(argv):
@@ -482,9 +486,28 @@ def _names_a_change(text: str) -> bool:
     return bool(re.search(r"\b(?:Path|pathlib)\b", text) and re.search(r"\.\s*replace\b", text))   # Path.replace moves a file
 
 
+def _python_option_i(argv) -> bool:
+    """-i among python's own options: not inside -Wignore, not past the program it runs."""
+    skip = False
+    for w in argv:
+        if skip:
+            skip = False
+            continue
+        if w in ("-W", "-X"):
+            skip = True
+            continue
+        if w == "-" or not w.startswith("-"):
+            return False
+        if re.fullmatch(r"-[bBdEIOPqRsSuv]*i[A-Za-z]*", w):
+            return True
+        if re.match(r"-[bBdEIOPqRsSuv]*[cm]", w):
+            return False
+    return False
+
+
 def _runs_past_a_syntax_error(e, code: str) -> bool:
     """`python -i` carries on after a syntax error, so code it cannot compile still runs line by line."""
-    if not shellparse._PYTHON.fullmatch(e.program) or not any(re.fullmatch(r"-[A-Za-z]*i[A-Za-z]*", w) for w in e.argv):
+    if not shellparse._PYTHON.fullmatch(e.program) or not _python_option_i(e.argv):
         return False
     try:
         python_nodes(code)
@@ -560,7 +583,7 @@ def _python_write_targets(code: str) -> List[str]:
                 dest = (literal(node.args[0]) or path_argument(node.args[0])) if node.args else None
                 out += [_CopyWord(dest, parent)] if dest else []
             if isinstance(func.value, ast.Name) and modules.get(func.value.id, func.value.id) in ("io", "builtins", "os",
-                                                                                                  "shutil"):
+                                                                                                  "shutil", "send2trash"):
                 name = modules.get(func.value.id, func.value.id) + "." + func.attr
         # Release review 2026-11-02: moves and copies by literal name. The destination is written; a move's source goes.
         changes = {"os.rename": 2, "os.replace": 2, "os.renames": 2, "shutil.move": 2, "shutil.copy": 1,
@@ -573,9 +596,14 @@ def _python_write_targets(code: str) -> List[str]:
             out += [_CopyWord(dest, source or "", tree=name == "shutil.copytree")] if dest else []
             out += [_CopyWord(source, moved=True)] if source and changes[name] == 2 else []
             continue
-        if name in ("os.remove", "os.unlink", "send2trash.send2trash") and node.args and literal(node.args[0]):
-            out.append(_CopyWord(literal(node.args[0]), moved=True, removed=True))   # read for saves; deletes.py has the rest
-            continue
+        if name in ("os.remove", "os.unlink", "send2trash.send2trash"):
+            given = {k.arg: k.value for k in node.keywords}
+            first = node.args[0] if node.args else given.get("path", given.get("paths"))
+            items = first.elts if isinstance(first, (ast.List, ast.Tuple)) else [first] if first is not None else []
+            words = [w for w in (literal(i) or path_argument(i) for i in items) if w]
+            if words:
+                out += [_CopyWord(w, moved=True, removed=True) for w in words]   # read for saves; deletes.py has the rest
+                continue
         keyword = "path" if name == "os.truncate" else "file"
         argument = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == keyword), None)
         value = literal(argument)
@@ -662,13 +690,15 @@ def copy_targets(e) -> List[Tuple[str, Tuple[str, ...]]]:
         target, words, k = None, [], 0
         while k < len(argv):
             w = argv[k]
-            if w in ("-t", "--target-directory") and k + 1 < len(argv):
+            if w in ("-t", "--target-directory") and k + 1 < len(argv) and p != "rsync":
                 target = argv[k + 1]
                 k += 2
                 continue
             if w.startswith("--target-directory="):
                 target = w.split("=", 1)[1]
-            elif w in _CP_VALUED:
+            elif p in ("cp", "mv") and re.fullmatch(r"-t.+", w):
+                target = w[2:]
+            elif (w in _CP_VALUED and not (p == "rsync" and w == "-t")) or (p == "rsync" and w in ("-e", "--rsh")):
                 k += 2
                 continue
             elif w == "--":
@@ -850,8 +880,11 @@ def _keeps_source_folders(e) -> bool:
     if e.program == "rsync":
         relative = any(w == "--relative" or re.fullmatch(r"-[A-Za-z]*R[A-Za-z]*", w) for w in e.argv)
     else:
-        relative = e.program == "cp" and "--parents" in e.argv
-    return relative and any("/" in s.replace("\\", "/") for s in _plain_operands(e.argv)[:-1])
+        relative = e.program == "cp" and any(re.fullmatch(r"--pa(?:r(?:e(?:n(?:ts?)?)?)?)?", w) for w in e.argv)
+    if not relative:
+        return False
+    sources = [s for _, words in copy_targets(e) for s in words]
+    return any("/" in s.replace("\\", "/") and (_name(s).endswith(SAVE_EXTS) or _may_bring_saves(s)) for s in sources)
 
 
 def _may_bring_saves(source: str) -> bool:
@@ -879,9 +912,7 @@ def bulk_destinations(e) -> List[str]:
     if p == "expand-archive":
         return (list(ps_param(e, "destinationpath", 1, before=(("path", "literalpath"),))) or ["."])[:1]
     if p in ("rsync", "scp"):
-        return _plain_operands_valued(argv, ("--exclude", "--include", "--filter", "-f", "-e", "--rsh", "--files-from",
-                                             "--exclude-from", "--include-from", "--link-dest", "--compare-dest",
-                                             "-P", "-i", "-o", "-F", "-l"))[-1:]
+        return _plain_operands_valued(argv, _RSYNC_VALUED)[-1:]
     if p == "robocopy":
         pos = robocopy_positionals(argv)
         return [pos[1]] if len(pos) == 2 else []
@@ -1083,7 +1114,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if e.program in ("rsync", "scp") and is_save(a_bulk, roots):
                 saves.append((targets.physical_operand(e, dst, cwd, env) or "", "write"))     # one named save, as cp
             elif is_save_folder(a_bulk, roots):
-                named = _plain_operands(e.argv)[:-1] if e.program in ("rsync", "scp") else []
+                named = _plain_operands_valued(e.argv, _RSYNC_VALUED)[:-1] if e.program in ("rsync", "scp") else []
                 if named and all(s.lower().endswith(SAVE_EXTS) for s in named):
                     physical = targets.physical_operand(e, dst, cwd, env) or ""
                     saves.extend((paths.physical_abs(physical.rstrip("/\\") + "/" + _name(s)) if physical else "", "write")
@@ -1091,7 +1122,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 else:
                     bulk_into_saves(dst)
             elif is_settings_folder(a_bulk, roots) and (
-                    e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _plain_operands(e.argv)[:-1])) and (
+                    e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _plain_operands_valued(e.argv, _RSYNC_VALUED)[:-1])) and (
                     _settings_hold_saves(targets.physical_operand(e, dst, cwd, env))):
                 bulk_into_saves(dst, "/Saves")
         for dst, srcs in copy_targets(e):

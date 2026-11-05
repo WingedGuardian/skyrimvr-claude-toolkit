@@ -621,3 +621,21 @@ def test_mo2_update_does_not_keep_old_distribution_files(tmp_path, sevenz, game)
     r = run(archive(tmp_path, ENTRIES), "--update", "--apply", env=env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods))
     assert r.returncode == 0 and not (old / "Foo_DISTR.ini").exists(), r.stdout + r.stderr
 
+
+
+def test_mo2_update_replaces_unedited_mod_data_and_the_plan_says_so(tmp_path, sevenz, game):
+    mods, old = _old_mod(tmp_path)
+    env = env_for(tmp_path, sevenz, game, SKYRIM_MO2_MODS=mods)
+    mine = old / "Example_DISTR.ini"
+    mine.write_bytes(b"v1\n")
+    records = tmp_path / "records"
+    records.mkdir(parents=True)
+    manifest = "{}  {}\n".format(__import__("hashlib").sha256(b"v1\n").hexdigest(), mine)
+    (records / "ExampleMod.files.txt").write_text(manifest, encoding="utf-8")
+    entries = ENTRIES + [{"path": "Data/Example_DISTR.ini", "data": "v2\n"}]
+    dry = run(archive(tmp_path, entries), "--update", env=env)
+    planned = [l for l in dry.stdout.splitlines() if "Example_DISTR.ini" in l and "CHANGED" not in l]
+    assert planned and all("OVERWRITE" in l and "CONFIG-NEW" not in l for l in planned), dry.stdout
+    r = run(archive(tmp_path, entries), "--update", "--apply", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert mine.read_bytes() == b"v2\n" and not (old / "Example_DISTR.ini.new").exists()

@@ -9,7 +9,7 @@ import pytest
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import audit, paths, shell_rules, writes  # noqa: E402
+from skyguard import audit, paths, shell_rules, shellparse, writes  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -160,3 +160,51 @@ def test_a_keyword_destination_is_read_like_a_positional_one():
 def test_an_unresolved_move_source_with_a_protected_root_named_is_refused(world):
     assert judge(world, 'mv "$X" /elsewhere/y; ls "<I>/Data"', "/elsewhere")[1] == {"S-DEL-UNRESOLVED"}
 
+
+
+# ---- the final review of the release range
+
+@pytest.mark.parametrize("command", [
+    "cp --parents --target-directory='<C>' Saves/main.ess", "cp --target-directory='<C>' --parents ./Saves/main.ess",
+    "cp --parents -t'<C>' Saves/main.ess", "cp --parent Saves/main.ess '<C>/'", "cp --pa Saves/main.skse '<C>/'",
+])
+def test_every_spelling_of_a_parents_copy_into_the_settings_folder_needs_the_approval(world, command):
+    assert judge(world, command, os.path.dirname(world[0]))[1] == {"S-SAVE-APPROVAL"}
+
+
+@pytest.mark.parametrize("command", [
+    "cp --parents -t '<C>' a.ini", "cp --parents '<C>/a.ini' '<C>/'", "rsync -e /usr/bin/ssh -R a.ini '<C>/'",
+    "rsync -t a.ini '<C>/'",
+])
+def test_a_named_settings_file_is_no_bulk_save_change_however_it_is_copied(world, command):
+    assert judge(world, command, os.path.dirname(world[0]))[0] == "allow"
+
+
+def test_to_rsync_t_keeps_times_and_names_no_destination(world):
+    assert [writes.copy_targets(e) for e in shellparse.parse("rsync -t a.ini b/", "bash").execs] == [[("b/", ("a.ini",))]]
+
+
+@pytest.mark.parametrize("code", [
+    "from os import remove; from pathlib import Path; remove(Path('<C>/Saves/main.ess'))",
+    "import os as o; from pathlib import Path; o.remove(Path('<C>/Saves/main.ess'))",
+    "from os import remove; remove(path='<C>/Saves/main.ess')",
+    "import send2trash; send2trash.send2trash('<C>/Saves/main.ess')",
+    "from send2trash import send2trash; send2trash(['<C>/Saves/main.ess'])",
+    "from send2trash import send2trash; send2trash(paths='<C>/Saves/main.ess')",
+])
+def test_every_spelling_of_a_python_save_delete_is_read(world, code):
+    assert judge(world, 'python -c "{}"'.format(code))[1] & {"S-SAVE-BACKUP", "S-DEL-CONFIG"}
+
+
+@pytest.mark.parametrize("options", ["-W ignore::foo.Bar", "-W ignore::foo.Bar -", "-X pycache_prefix=.cache", "-X utf8"])
+def test_a_python_option_value_with_a_dot_still_reads_its_program_from_a_pipe(world, options):
+    assert judge(world, """echo "import os; os.remove('Data/x.esp')" | python {}""".format(options))[0] == "deny"
+
+
+@pytest.mark.parametrize("argv, want", [
+    (["-i"], True), (["-Bi"], True), (["-ic", "x"], True), (["-i", "-c", "x"], True), (["-W", "x", "-i"], True),
+    (["-Wignore", "-c", "x"], False), (["-Ximporttime", "-c", "x"], False), (["tool.py", "-i"], False),
+    (["-c", "x", "-i"], False), (["-m", "x", "-i"], False), (["-ci"], False), (["-"], False),
+])
+def test_only_pythons_own_i_counts(argv, want):
+    assert writes._python_option_i(argv) is want

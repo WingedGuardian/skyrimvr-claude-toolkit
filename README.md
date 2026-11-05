@@ -23,8 +23,8 @@ The optional Windows file lock is off by default. Its limits and the hook covera
 
 - **Codex CLI on Windows**, alongside Claude Code: the same instructions, skills and guards. Approve the hooks with
   `/hooks` (see *Using with Codex* below). Other agents can wire the guards into themselves with [ADAPTING.md](ADAPTING.md).
-- **One guard engine in Python** (`tools/skyguard/`) behind both agents' hooks. A guard that cannot run refuses
-  rather than allows; `bash tools/hook-canary.sh` and `bash tools/skydoctor` show what is live.
+- **One guard engine in Python** (`tools/skyguard/`) behind both agents' hooks. A Claude Code guard that cannot run
+  refuses rather than allows; on Codex a hook that crashes, is killed or times out fails open (see the CHANGELOG's known limits). `bash tools/hook-canary.sh` and `bash tools/skydoctor` show what is live.
 - **Game saves are backed up, not asked about:** a change to one or two of them first copies both files of each,
   verified and kept forever; more than two need the approval line you type.
 - **An optional file lock** for the vanilla masters and archives (Windows, off by default), described below.

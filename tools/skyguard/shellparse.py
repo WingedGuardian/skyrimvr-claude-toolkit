@@ -2442,7 +2442,7 @@ class _Resolver:
             self.ctx.unnamed.append(e)
         if self.xargs:                      # `... | xargs bash`, `xargs python`: the code arrives from stdin as args
             self.ctx.via_xargs.add(id(e))
-            if program in ALL_SHELLS or (consumer_kind(program) == "interpreter" and _reads_code(e.argv)):
+            if program in ALL_SHELLS or (consumer_kind(program) == "interpreter" and _reads_code(e.argv, bool(_PYTHON.fullmatch(program)))):
                 self.opaque(k)
         if self.bodies and program in ALL_SHELLS and self.recurse:
             for b, _ in self.bodies:
@@ -3370,7 +3370,7 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
             if ci == 0:
                 continue
             readers = [e for e in cmade if e.stdin_from == "pipe" and id(e) not in ctx.via_xargs and (
-                e.program in ALL_SHELLS or (consumer_kind(e.program) == "interpreter" and _reads_code(e.argv)) or
+                e.program in ALL_SHELLS or (consumer_kind(e.program) == "interpreter" and _reads_code(e.argv, bool(_PYTHON.fullmatch(e.program)))) or
                 _ps_reads_commands(e))]
             if not readers:
                 continue
@@ -3523,21 +3523,21 @@ def _ps_reads_commands(e: Exec) -> bool:
     return e.program == "invoke-expression" and e.dialect == "powershell" and not e.argv
 
 
-def _reads_code(argv) -> bool:
+def _reads_code(argv, python: bool = True) -> bool:
     """Whether an interpreter takes its PROGRAM from stdin (`python`, `python -`, `node`), rather than from -c/-e
-    or a script file (then stdin is data)."""
+    or a script file (then stdin is data). Only python's -X and -W take a value."""
     skip = False
     for a in argv:
         if a in _CODE_OPTS:
             return False
-        if skip and "." not in a:                   # `python -X utf8` names no script; `perl -W tool.pl` does
+        if skip:                                    # `python -X utf8` names no script; `perl -W tool.pl` does
             skip = False
             continue
         if a == "-":
             return True
         if not a.startswith("-"):
             return False
-        skip = a in ("-X", "-W", "--check-hash-based-pycs")
+        skip = python and a in ("-X", "-W", "--check-hash-based-pycs")
     return True
 _SCANNERS = {"bash": _Bash, "powershell": _Pwsh, "cmd": _Cmdexe}
 

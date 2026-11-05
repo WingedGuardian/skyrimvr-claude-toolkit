@@ -617,7 +617,9 @@ pick_3x() {  # $1 = placeholder name, $2 = detected value -> prints the value to
     v=$( set -a; . "$MIG_ENV" >/dev/null 2>&1; n="SKYRIM_3X_$1"; printf '%s' "${!n:-}" )
     if [ -n "$v" ] && [ "$v" != "$2" ] && [ -d "$v" ] && [ "${SKYRIM_PREFER_DETECTED:-}" != 1 ]; then
         echo "  $1: your 3.x CLAUDE.md said $v (detected: ${2:-nothing}) -- keeping yours" >&2
-        if [ "$CARRIED_HAND_EDITED" != 1 ]; then
+        if [ "$1" = MO2_PROFILE_DIR ]; then
+            echo "    For this run only: the next setup follows detection for this path." >&2
+        elif [ "$CARRIED_HAND_EDITED" != 1 ]; then
             echo "    For this run only: nothing shows you changed it, so the next setup follows detection. To keep it, set it in skyrim-paths.env." >&2
         fi
         printf '%s' "$v"
