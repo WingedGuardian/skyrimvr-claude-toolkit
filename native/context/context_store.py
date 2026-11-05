@@ -1,0 +1,564 @@
+#!/usr/bin/env python3
+"""Put selected configuration and mutable database files back exactly after a live test.
+
+Contract:
+- prepare needs a cold game and takes ownership first; another owner, a running process, a file some process holds open,
+  a link, or an incomplete earlier run all refuse before anything changes.
+- Unchanged bytes are stored once, by hash, outside the game folder, however many runs use them. No staging copy, no links.
+- The manifest is durable before the first live change, so every later failure can be undone by `restore`.
+- restore keeps what the test changed or created as evidence, puts back original bytes and times, touches nothing outside
+  the declared roots, and keeps ownership until a full re-hash passes. It can always run again.
+- This never starts or stops a game. Launch approval belongs to the caller and is never carried by a prepared context.
+
+Saves are not handled here: pair protection has its own route. Not a security boundary against a writer ignoring the slots.
+"""
+import argparse
+import ctypes
+import hashlib
+import json
+import msvcrt
+import os
+import shutil
+import stat
+import subprocess
+import sys
+from contextlib import contextmanager
+from pathlib import Path, PurePosixPath
+
+ACTIVE, MANIFEST, MANIFEST_HASH, RECEIPT = "active.json", "manifest.json", "manifest.sha256", "receipt.json"
+PROFILE_KEYS = {"schema", "roots", "edits", "additions", "cold_processes", "slots"}
+FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+GENERIC_READ, OPEN_EXISTING, INVALID_HANDLE = 0x80000000, 3, ctypes.c_void_p(-1).value
+
+
+class Refused(Exception):
+    """A precondition failed; nothing was changed by this call unless the message says so."""
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_durable(path: Path, data: bytes) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    with open(temporary, "wb") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
+def write_json(path: Path, value) -> None:
+    write_durable(path, (json.dumps(value, indent=1, sort_keys=True) + "\n").encode("utf-8"))
+
+
+def read_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def running_processes(names) -> list:
+    """Exact image names now running. Not knowing is a refusal, never an empty answer."""
+    try:
+        done = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True, timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise Refused("cannot tell which processes are running: {}".format(error)) from error
+    if done.returncode or not done.stdout.strip():
+        raise Refused("cannot tell which processes are running: tasklist exit {}".format(done.returncode))
+    wanted = {name.lower() for name in names}
+    seen = {line.split('","')[0].strip('"').lower() for line in done.stdout.splitlines() if line.strip()}
+    return sorted(wanted & seen)
+
+
+def require_cold(names) -> None:
+    alive = running_processes(names)
+    if alive:
+        raise Refused("still running: " + ", ".join(alive))
+
+
+def require_unheld(path: Path) -> None:
+    """Asking for no sharing at all fails if any process has the file open, which is what an active writer looks like."""
+    create = ctypes.windll.kernel32.CreateFileW
+    create.restype = ctypes.c_void_p
+    create.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+    handle = create(str(path), GENERIC_READ, 0, None, OPEN_EXISTING, 0, None)
+    if handle == INVALID_HANDLE or handle is None:
+        raise Refused("{} is in use or unreadable".format(path))
+    close = ctypes.windll.kernel32.CloseHandle
+    close.argtypes = [ctypes.c_void_p]
+    close(handle)
+
+
+def inside(game: Path, relative: str) -> Path:
+    pure = PurePosixPath(relative.replace("\\", "/"))
+    if not relative or pure.is_absolute() or ":" in relative or ".." in pure.parts:
+        raise Refused("{} must stay inside the game folder".format(relative))
+    return game / Path(*pure.parts)
+
+
+def is_link(path: Path) -> bool:
+    return bool(os.lstat(path).st_file_attributes & FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def require_plain_ancestors(game: Path, path: Path) -> None:
+    current = path
+    while current != game:
+        if os.path.lexists(current) and is_link(current):
+            raise Refused("{} is a link".format(current))
+        current = current.parent
+
+
+def walk(game: Path, roots) -> tuple:
+    """(files, folders) as sorted game-relative paths; any link stops the whole thing."""
+    files, folders = [], []
+    stack = [inside(game, root) for root in roots]
+    while stack:
+        current = stack.pop()
+        require_plain_ancestors(game, current)
+        folders.append(current.relative_to(game).as_posix())
+        with os.scandir(current) as entries:
+            for entry in entries:
+                path = Path(entry.path)
+                if is_link(path):
+                    raise Refused("{} is a link".format(path))
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(path)
+                elif os.lstat(path).st_nlink != 1:
+                    raise Refused("{} has another hard link".format(path))
+                else:
+                    files.append(path.relative_to(game).as_posix())
+    return sorted(files), sorted(folders)
+
+
+# --- ownership -----------------------------------------------------------------------------------------------------------
+@contextmanager
+def slot_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+b") as stream:
+        if stream.seek(0, 2) == 0:
+            stream.write(b"\0")
+            stream.flush()
+        stream.seek(0)
+        try:
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as error:
+            raise Refused("the ownership file is locked by someone else") from error
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def change_slots(slots, owner: str, release: bool = False) -> None:
+    """Byte-level so every other field stays exactly as written. Never steals: a foreign holder refuses."""
+    if not slots:
+        return
+    path = Path(slots["file"])
+    with slot_lock(Path(slots["lock"])):
+        raw = path.read_bytes()
+        value = json.loads(raw)
+        # Both ways accept an empty slot: a crash around either step must not strand recovery. A foreign holder always refuses.
+        allowed = (None, owner)
+        if any(key not in value or value[key] not in allowed for key in slots["keys"]):
+            raise Refused("the runtime is held by another owner, or the ownership file lacks a slot")
+        updated = raw
+        for key in slots["keys"]:
+            needle = '"{}": {}'.format(key, json.dumps(value[key])).encode("utf-8")
+            if updated.count(needle) != 1:
+                raise Refused("unexpected ownership file layout at {}".format(key))
+            updated = updated.replace(needle, '"{}": {}'.format(key, json.dumps(None if release else owner)).encode("utf-8"))
+        if updated != raw:
+            write_durable(path, updated)
+
+
+def begin(state: Path, owner: str, run: str, slots) -> None:
+    state.mkdir(parents=True, exist_ok=True)
+    active = state / ACTIVE
+    record = {"owner": owner, "run": run, "phase": "preparing", "slots": slots}
+    try:
+        with open(active, "x", encoding="utf-8") as stream:
+            json.dump(record, stream, indent=1, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except FileExistsError as error:
+        raise Refused("a context is already active: restore it first ({})".format(active)) from error
+    try:
+        change_slots(slots, owner)
+    except BaseException:
+        active.unlink()
+        raise
+
+
+def set_phase(state: Path, phase: str) -> None:
+    record = read_json(state / ACTIVE)
+    record["phase"] = phase
+    write_json(state / ACTIVE, record)
+
+
+def status(state: Path):
+    active = Path(state) / ACTIVE
+    return read_json(active) if active.is_file() else None
+
+
+# --- capture ------------------------------------------------------------------------------------------------------------
+def store_blob(store: Path, source: Path, digest: str) -> None:
+    """Once per distinct content. An existing blob is re-hashed: a damaged reference must not be trusted as a backup."""
+    blob = store / digest
+    if blob.exists():
+        if sha256(blob) != digest:
+            raise Refused("reference {} is damaged".format(digest))
+        return
+    temporary = store / (digest + ".incoming")
+    if temporary.exists():
+        os.chmod(temporary, stat.S_IWRITE)      # left by an interrupted capture; only ever replaced after a hash check
+    shutil.copyfile(source, temporary)
+    if sha256(temporary) != digest:
+        temporary.unlink()
+        raise Refused("{} changed while it was being captured".format(source))
+    os.chmod(temporary, stat.S_IREAD)
+    os.replace(temporary, blob)
+
+
+def capture(game: Path, store: Path, roots) -> dict:
+    files, folders = walk(game, roots)
+    store.mkdir(parents=True, exist_ok=True)
+    rows = {}
+    for relative in files:
+        path = game / relative
+        require_unheld(path)
+        digest = sha256(path)
+        store_blob(store, path, digest)
+        info = os.lstat(path)
+        if sha256(path) != digest:
+            raise Refused("{} changed while it was being captured".format(path))
+        rows[relative] = {"sha256": digest, "bytes": info.st_size, "mtime_ns": info.st_mtime_ns, "read_only": not info.st_mode & stat.S_IWRITE}
+    return {"files": rows, "folders": folders}
+
+
+def check_profile(profile) -> None:
+    unknown = set(profile) - PROFILE_KEYS
+    if unknown:
+        raise Refused("unknown profile key: " + ", ".join(sorted(unknown)))
+    if profile.get("schema") != 1:
+        raise Refused("profile schema must be 1")
+    if not profile.get("roots"):
+        raise Refused("a profile must name its roots")
+    if not profile.get("cold_processes"):
+        raise Refused("a profile must name cold_processes: without them a running game cannot be seen")
+
+
+def replace_verified(blob_or_source: Path, target: Path, digest: str, mtime_ns=None, read_only=False) -> None:
+    """Atomic: the target is the old bytes or the verified new bytes, never a partial write."""
+    temporary = target.with_name(target.name + ".context-incoming")
+    if os.path.lexists(temporary):
+        os.chmod(temporary, stat.S_IWRITE)      # left by an interrupted restore
+    shutil.copyfile(blob_or_source, temporary)
+    os.chmod(temporary, stat.S_IWRITE)
+    if sha256(temporary) != digest:
+        temporary.unlink()
+        raise Refused("{} does not hash to its reference".format(blob_or_source))
+    if mtime_ns is not None:
+        os.utime(temporary, ns=(mtime_ns, mtime_ns))
+    if read_only:
+        os.chmod(temporary, stat.S_IREAD)
+    if os.path.lexists(target):
+        os.chmod(target, stat.S_IWRITE)         # Windows refuses to replace a read-only file
+    os.replace(temporary, target)
+
+
+def planned_edits(game: Path, profile, captured) -> list:
+    """All checked before any is applied; several edits to one file apply in order."""
+    contents, order = {}, []
+    for edit in profile.get("edits", []):
+        relative = inside(game, edit["path"]).relative_to(game).as_posix()
+        if relative not in captured["files"]:
+            raise Refused("{} is outside the captured roots, so it could not be restored".format(relative))
+        data = contents.get(relative)
+        if data is None:
+            data = (game / relative).read_bytes()
+            order.append(relative)
+        old, new = edit["old"].encode("utf-8"), edit["new"].encode("utf-8")
+        if data.count(old) != 1:
+            raise Refused("edit for {} must match exactly once: {!r}".format(relative, edit["old"]))
+        contents[relative] = data.replace(old, new)
+    return [(relative, contents[relative]) for relative in order]
+
+
+def planned_additions(game: Path, profile) -> list:
+    rows = []
+    for addition in profile.get("additions", []):
+        target = inside(game, addition["target"])
+        require_plain_ancestors(game, target)
+        source = Path(addition["source"])
+        if os.path.lexists(target):
+            raise Refused("{} exists: an addition never replaces a file".format(target))
+        if not source.is_file() or sha256(source) != addition["sha256"]:
+            raise Refused("addition {} does not match its declared hash".format(source))
+        missing, current = [], target.parent
+        while current != game and not current.exists():
+            missing.append(current.relative_to(game).as_posix())
+            current = current.parent
+        rows.append({"source": str(source), "sha256": addition["sha256"], "target": target.relative_to(game).as_posix(), "created_folders": missing})
+    return rows
+
+
+def check_request(game: Path, state: Path, store: Path, owner: str, run: str, profile: dict) -> None:
+    if not owner:
+        raise Refused("a context must name its owner")
+    for label, path in (("state", state), ("store", store)):
+        if path == game or game in path.parents:
+            raise Refused("the {} folder must be outside the game folder".format(label))
+    check_profile(profile)
+    for root in profile["roots"]:
+        if not inside(game, root).is_dir():
+            raise Refused("root {} is not a folder".format(root))
+    if (state / run).exists():
+        raise Refused("run {} already exists: run names are never reused".format(run))
+
+
+def check(game, state, store, owner: str, run: str, profile: dict) -> dict:
+    """Everything prepare would refuse, without ownership, capture or any write. A pass says only that it would start now."""
+    game, state, store = Path(game).resolve(), Path(state).resolve(), Path(store).resolve()
+    check_request(game, state, store, owner, run, profile)
+    require_cold(profile["cold_processes"])
+    if status(state) is not None:
+        raise Refused("a context is already active: restore it first")
+    slots = profile.get("slots")
+    if slots:
+        value = json.loads(Path(slots["file"]).read_bytes())
+        if any(key not in value or value[key] not in (None, owner) for key in slots["keys"]):
+            raise Refused("the runtime is held by another owner, or the ownership file lacks a slot")
+    files, _ = walk(game, profile["roots"])
+    for relative in files:
+        require_unheld(game / relative)
+    edits = planned_edits(game, profile, {"files": dict.fromkeys(files)})
+    additions = planned_additions(game, profile)
+    return {"files": len(files), "bytes": sum(os.lstat(game / relative).st_size for relative in files),
+            "edits": [relative for relative, _ in edits], "additions": [row["target"] for row in additions], "would_start": True}
+
+
+def prepare(game, state, store, owner: str, run: str, profile: dict) -> dict:
+    game, state, store = Path(game).resolve(), Path(state).resolve(), Path(store).resolve()
+    check_request(game, state, store, owner, run, profile)
+    slots = profile.get("slots")
+    require_cold(profile["cold_processes"])
+    begin(state, owner, run, slots)
+    try:
+        require_cold(profile["cold_processes"])    # after ownership, so a competing launch cannot slip between
+        folder = state / run
+        folder.mkdir(parents=True, exist_ok=False)
+        captured = capture(game, store, profile["roots"])
+        edits = planned_edits(game, profile, captured)
+        additions = planned_additions(game, profile)
+    except Refused:
+        release_clean(state, owner, slots)
+        raise
+    manifest = {"schema": 1, "owner": owner, "run": run, "roots": profile["roots"], "cold_processes": profile["cold_processes"],
+                "slots": slots, "additions": additions, **captured}
+    write_json(folder / MANIFEST, manifest)
+    write_durable(folder / MANIFEST_HASH, sha256(folder / MANIFEST).encode("ascii"))
+    os.chmod(folder / MANIFEST, stat.S_IREAD)
+    set_phase(state, "captured")
+    try:
+        for relative, data in edits:
+            temporary = folder / "edit.tmp"
+            write_durable(temporary, data)
+            replace_verified(temporary, game / relative, sha256_bytes(data), read_only=captured["files"][relative]["read_only"])
+            temporary.unlink()
+        for row in additions:
+            target = game / row["target"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            replace_verified(Path(row["source"]), target, row["sha256"])
+    except Refused:
+        restore(game, state, store, owner)
+        raise
+    set_phase(state, "prepared")
+    return status(state)
+
+
+def release_clean(state: Path, owner: str, slots) -> None:
+    """Nothing live was changed: give ownership back and leave no sign of an active context."""
+    change_slots(slots, owner, release=True)
+    (state / ACTIVE).unlink()
+
+
+def load_manifest(folder: Path) -> dict:
+    path, recorded = folder / MANIFEST, folder / MANIFEST_HASH
+    if not recorded.is_file() or recorded.read_text(encoding="ascii").strip() != sha256(path):
+        raise Refused("the manifest does not match its recorded hash: not restoring from it")
+    return read_json(path)
+
+
+# --- restore ------------------------------------------------------------------------------------------------------------
+def keep_evidence(source: Path, evidence: Path) -> None:
+    """Copy, never move: until the restore replaces the live file, the only copy of the test's result stays where it was."""
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    target, n = evidence, 1
+    digest = sha256(source)
+    while target.exists():
+        if sha256(target) == digest:
+            return
+        target = evidence.with_name("{}.{}".format(evidence.name, n))
+        n += 1
+    shutil.copyfile(source, target)
+    if sha256(target) != digest:
+        raise Refused("evidence copy of {} failed verification".format(source))
+
+
+def compare(game: Path, manifest: dict) -> dict:
+    current, _ = walk(game, [r for r in manifest["roots"] if inside(game, r).exists()])
+    rows = manifest["files"]
+    report = {"changed": [], "missing": [], "created": [], "times": []}
+    for relative, row in sorted(rows.items()):
+        path = game / relative
+        if not path.exists():
+            report["missing"].append(relative)
+        elif sha256(path) != row["sha256"]:
+            report["changed"].append(relative)
+        elif os.lstat(path).st_mtime_ns != row["mtime_ns"]:
+            report["times"].append(relative)
+    report["created"] = [relative for relative in current if relative not in rows]
+    return report
+
+
+def verify(game, state) -> dict:
+    game, state = Path(game).resolve(), Path(state).resolve()
+    record = status(state)
+    if record is None:
+        raise Refused("no active context")
+    return compare(game, load_manifest(state / record["run"]))
+
+
+def remove_empty_new_folders(game: Path, manifest: dict) -> None:
+    known = set(manifest["folders"])
+    candidates = []
+    for root in manifest["roots"]:
+        base = inside(game, root)
+        if base.exists():
+            candidates += [p for p in base.rglob("*") if p.is_dir() and p.relative_to(game).as_posix() not in known]
+    for path in sorted(candidates, key=lambda p: len(p.parts), reverse=True):
+        if not any(path.iterdir()):
+            path.rmdir()
+
+
+def restore(game, state, store, owner: str) -> dict:
+    game, state, store = Path(game).resolve(), Path(state).resolve(), Path(store).resolve()
+    record = status(state)
+    if record is None:
+        raise Refused("no active context")
+    if record["owner"] != owner:
+        raise Refused("this context belongs to owner {}".format(record["owner"]))
+    phase, run, slots = record["phase"], record["run"], record["slots"]
+    folder = state / run
+    if phase == "preparing":
+        # Stopped before the phase moved to captured, and nothing live changes before it does.
+        release_clean(state, owner, slots)
+        return {"phase_at_restore": phase, "verified": True, "live_changes": 0}
+    manifest = load_manifest(folder)
+    require_cold(manifest["cold_processes"])
+    current, _ = walk(game, [r for r in manifest["roots"] if inside(game, r).exists()])
+    for relative in current:
+        require_unheld(game / relative)
+    addition_paths = [game / row["target"] for row in manifest["additions"]]
+    for path in addition_paths:
+        if path.exists():
+            require_unheld(path)
+    set_phase(state, "restoring")
+    before = compare(game, manifest)
+    failed, altered = [], []
+    evidence = folder / "evidence"
+    for relative in before["changed"] + before["missing"] + before["times"]:
+        row = manifest["files"][relative]
+        target, blob = game / relative, store / row["sha256"]
+        try:
+            if not blob.is_file() or sha256(blob) != row["sha256"]:
+                raise Refused("reference damaged")
+            if relative in before["changed"]:
+                keep_evidence(target, evidence / "changed" / relative)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if relative in before["times"]:
+                os.utime(target, ns=(row["mtime_ns"], row["mtime_ns"]))
+            else:
+                replace_verified(blob, target, row["sha256"], row["mtime_ns"], row["read_only"])
+        except (Refused, OSError):
+            failed.append(relative)
+    for relative in before["created"]:
+        path = game / relative
+        try:
+            keep_evidence(path, evidence / "created" / relative)
+            path.unlink()
+        except (Refused, OSError):
+            failed.append(relative)
+    for row in manifest["additions"]:
+        path = game / row["target"]
+        try:
+            if path.exists():
+                if sha256(path) != row["sha256"]:
+                    altered.append(row["target"])
+                    keep_evidence(path, evidence / "altered-additions" / row["target"])
+                path.unlink()
+            for created in row["created_folders"]:
+                folder_path = game / created
+                if folder_path.is_dir() and not any(folder_path.iterdir()):
+                    folder_path.rmdir()
+        except (Refused, OSError):
+            failed.append(row["target"])
+    remove_empty_new_folders(game, manifest)
+    after = compare(game, manifest)
+    leftovers = [row["target"] for row in manifest["additions"] if (game / row["target"]).exists()]
+    clean = not (failed or leftovers or any(after.values()))
+    receipt = {"owner": owner, "run": run, "phase_at_restore": phase, "manifest_sha256": sha256(folder / MANIFEST), "verified": clean,
+               "changed": before["changed"], "missing": before["missing"], "created": before["created"], "times": before["times"],
+               "altered_additions": altered, "failed": sorted(set(failed)), "after": after, "leftover_additions": leftovers,
+               "files_checked": len(manifest["files"])}
+    write_json(folder / RECEIPT, receipt)
+    if not clean:
+        set_phase(state, "restore-incomplete")
+        return receipt
+    release_clean(state, owner, slots)
+    return receipt
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("check", "prepare", "restore", "verify", "status"):
+        sub = commands.add_parser(name)
+        sub.add_argument("--state", type=Path, required=True)
+        if name != "status":
+            sub.add_argument("--game", type=Path, required=True)
+        if name in ("check", "prepare", "restore"):
+            sub.add_argument("--store", type=Path, required=True)
+            sub.add_argument("--owner", required=True)
+        if name in ("check", "prepare"):
+            sub.add_argument("--run", required=True)
+            sub.add_argument("--profile", type=Path, required=True)
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "check":
+            result = check(args.game, args.state, args.store, args.owner, args.run, read_json(args.profile))
+        elif args.command == "prepare":
+            result = prepare(args.game, args.state, args.store, args.owner, args.run, read_json(args.profile))
+        elif args.command == "restore":
+            result = restore(args.game, args.state, args.store, args.owner)
+        elif args.command == "verify":
+            result = verify(args.game, args.state)
+        else:
+            result = status(args.state)
+    except Refused as error:
+        print("refused: {}".format(error), file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=1, sort_keys=True))
+    return 1 if isinstance(result, dict) and result.get("verified") is False else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
