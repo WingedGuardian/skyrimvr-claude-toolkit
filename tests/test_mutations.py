@@ -10923,6 +10923,15 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      _MM_RP + "[review-scope-shipped]", "sweep-payload-review-scope-allowed"),
 ]]
 
+# The maintainer-only native tooling never ships. Builder + checker.
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
+    ("scripts/build_release_zip.py", 'EXCLUDE += ("native",)\n', "",
+     "tests/test_release_build.py::test_the_native_tooling_is_excluded_and_its_namesakes_ship",
+     "native-tooling-shipped"),
+    ("tools/check-release-payload.py", '    "native",                  # maintainer-only', '    # "native", maintainer-only',
+     _MM_RP + "[native-shipped]", "native-tooling-allowed-by-checker"),
+]]
+
 # Final sweep 2026-10-25 (X4 a0e4fd1): one red CI check must not skip the later ones. A twin per kind of step: a plain
 # check, a check with its own condition, and a job without the setup marker.
 _WF_T = "tests/test_workflows.py::test_one_red_check_never_skips_the_later_ones"

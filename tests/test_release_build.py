@@ -137,6 +137,24 @@ def test_the_maintainer_superpowers_tree_is_excluded_but_cited_evidence_ships(tm
     assert root + "docs/evidence/m.md" in names and root + "docs/superpowers.md" in names
 
 
+def test_the_native_tooling_is_excluded_and_its_namesakes_ship(tmp_path):
+    """native/ fetches GPL and third-party source on the maintainer's machine; it is no end-user requirement."""
+    repo = _repo(tmp_path)
+    paths = ("native/sdk/sdk.py", "native/README.md", "docs/native.md", "tools/native-notes.txt")
+    for rel in paths:
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x\n")
+    _git(repo, "add", "--", *paths)
+    _git(repo, "commit", "-q", "-m", "native tooling")
+    result, output = _build(repo, "HEAD", "--version", "1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    names = _names(_zip(output))
+    root = "skyrim-ai-assistant-toolkit-1/"
+    assert not [n for n in names if n.startswith(root + "native")], names
+    assert root + "docs/native.md" in names and root + "tools/native-notes.txt" in names
+
+
 def test_the_maintainer_review_scope_note_is_excluded_and_its_siblings_ship(tmp_path):
     """Final sweep 2026-10-25: docs/REVIEW-SCOPE.md is maintainer-only, like docs/superpowers/; other docs ship."""
     repo = _repo(tmp_path)

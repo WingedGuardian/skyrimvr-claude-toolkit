@@ -85,6 +85,8 @@ def pristine(tmp_path_factory):
         shutil.rmtree(root / "scripts" / "layer2-spike")
     if (root / "scripts" / "guard-corpus").is_dir():
         shutil.rmtree(root / "scripts" / "guard-corpus")
+    if (root / "native").is_dir():                          # excluded by build_release_zip.EXCLUDE
+        shutil.rmtree(root / "native")
     if (root / "scripts" / "guard-latency.py").exists():
         (root / "scripts" / "guard-latency.py").unlink()
     if (root / "scripts" / "prepush-gate.py").exists():     # excluded by build_release_zip.EXCLUDE like the two above
@@ -176,6 +178,7 @@ BREAKS = {
                               "scripts/guard-latency.py NOT shipped"),
     "git-shipped": (_mkdir(".git"), ".git NOT shipped"),
     "superpowers-shipped": (_mkdir(".superpowers"), ".superpowers NOT shipped"),
+    "native-shipped": (_mkdir("native"), "native NOT shipped"),
     "review-scope-shipped": (lambda r: (r / "docs" / "REVIEW-SCOPE.md").write_text("scope"),
                              "docs/REVIEW-SCOPE.md NOT shipped"),
     "docs-superpowers-shipped": (_mkdir("docs/superpowers"), "docs/superpowers NOT shipped"),
