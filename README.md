@@ -320,7 +320,7 @@ rows were blocked (`-Force`, `cp -f`, `sed -i` and `mv` over a file got through)
 **What it does not stop** (read these before relying on it):
 
 - **An xEdit or xelib save of a locked master is not stopped** (MEASURED for xelib on 4 of 4 mechanisms; the xEdit
-  program itself is INFERRED to behave the same, its GUI run is pending). The save renames the locked file into
+  program itself is INFERRED to behave the same, its GUI has not been run). The save renames the locked file into
   `Data/zEdit Backups/<name>.<stamp>.bak` and writes a new file under the vanilla name. The original bytes survive
   as the `.bak`, and the lock travels with it, but the new file is unlocked.
 - **Renaming a locked file away** (`mv Skyrim.esm Skyrim.esm.bak`) is not stopped: it needs only the delete right,
@@ -330,7 +330,7 @@ rows were blocked (`-Force`, `cp -f`, `sed -i` and `mv` over a file got through)
 - **Not measured at all:** the game reading locked masters (INFERRED: it opens them read-only); a symlink-based
   mod-manager deploy (needs Developer Mode, not available on the test machine); the ownership of a file by another
   principal.
-- **Pending the manual batch, so the lock stays off by default.** Wrye Bash scanning and building a Bashed Patch with
+- **Not run, so the lock stays off by default.** Wrye Bash scanning and building a Bashed Patch with
   the masters locked, Steam "Verify integrity" on a locked file, a **Steam game update**, an Anniversary Edition
   in-game **Creation download** (`cc*.esm` / `.bsa`, which are on the lock list), the xEdit program and Mod
   Organizer 2's virtual file system have **not** been run. A Steam update or a Creation download writes into the same
