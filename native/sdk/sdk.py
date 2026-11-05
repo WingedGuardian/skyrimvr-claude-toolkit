@@ -96,7 +96,19 @@ def compare_manifest(recorded: dict, current: dict) -> list:
     return problems
 
 
-def verify(prefix: Path, pins_path: Path = PINS) -> list:
+def sources_digest(native: Path = NATIVE) -> str:
+    """What the prefix copies from this tree. A changed header or config must make an already-built prefix stale."""
+    digest = hashlib.sha256()
+    roots = [native / "sdk/SkyrimNativeSdkConfig.cmake", native / "sdk/THIRD-PARTY-NOTICES.md",
+             native / "observation/include", native / "observation/asm"]
+    for root in roots:
+        for path in sorted(root.rglob("*")) if root.is_dir() else [root]:
+            if path.is_file():
+                digest.update(path.relative_to(native).as_posix().encode("utf-8") + b"\0" + bytes.fromhex(sha256(path)))
+    return digest.hexdigest()
+
+
+def verify(prefix: Path, pins_path: Path = PINS, native: Path = NATIVE) -> list:
     """Problems with the SDK at `prefix`; empty means every installed byte is what the receipt recorded."""
     receipt_path = prefix / RECEIPT
     if not receipt_path.is_file():
@@ -108,6 +120,8 @@ def verify(prefix: Path, pins_path: Path = PINS) -> list:
     problems = []
     if receipt.get("pins_sha256") != sha256(pins_path):
         problems.append("stale: the pins changed since this SDK was built")
+    if receipt.get("sources_sha256") != sources_digest(native):
+        problems.append("stale: the observation sources or SDK config changed since this SDK was built")
     problems.extend(compare_manifest(receipt.get("files") or {}, manifest(prefix)))
     return problems
 
@@ -220,7 +234,8 @@ def build(prefix: Path, work: Path, jobs: int) -> int:
     run("minhook-build", ["cmake", "--build", minhook_binary, "-j", str(jobs)], logs, env)
     run("minhook-install", ["cmake", "--install", minhook_binary], logs, env)
 
-    shutil.copytree(triplet_dir, prefix / "deps" / pins["triplet"], ignore=shutil.ignore_patterns("debug", "tools"))
+    # The whole tree: vcpkg's exported targets check their debug libraries exist even for a Release consumer.
+    shutil.copytree(triplet_dir, prefix / "deps" / pins["triplet"])
     shutil.copytree(NATIVE / "observation/include", prefix / "observation/include")
     shutil.copytree(NATIVE / "observation/asm", prefix / "observation/asm")
     package = prefix / "lib/cmake/SkyrimNativeSdk"
@@ -237,6 +252,7 @@ def build(prefix: Path, work: Path, jobs: int) -> int:
     receipt = {
         "schema": 1,
         "pins_sha256": sha256(PINS),
+        "sources_sha256": sources_digest(),
         "commonlib_commit": git_head(source),
         "openvr_commit": submodule,
         "minhook_commit": git_head(minhook_source),

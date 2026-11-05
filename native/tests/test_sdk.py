@@ -57,38 +57,58 @@ class Receipt(unittest.TestCase):
         (self.prefix / "lib" / "a.lib").write_bytes(b"one")
         self.pins = Path(self.tmp.name) / "pins.json"
         self.pins.write_text("{}", encoding="utf-8")
+        self.native = Path(self.tmp.name) / "native"
+        (self.native / "observation/include").mkdir(parents=True)
+        (self.native / "observation/asm").mkdir(parents=True)
+        (self.native / "sdk").mkdir()
+        self.header = self.native / "observation/include/a.hpp"
+        self.header.write_text("one", encoding="utf-8")
+        for name in ("SkyrimNativeSdkConfig.cmake", "THIRD-PARTY-NOTICES.md"):
+            (self.native / "sdk" / name).write_text("x", encoding="utf-8")
         self._write_receipt()
 
+    def verify(self):
+        return sdk.verify(self.prefix, self.pins, self.native)
+
     def _write_receipt(self):
-        receipt = {"pins_sha256": sdk.sha256(self.pins), "files": sdk.manifest(self.prefix)}
+        receipt = {"pins_sha256": sdk.sha256(self.pins), "sources_sha256": sdk.sources_digest(self.native),
+                   "files": sdk.manifest(self.prefix)}
         (self.prefix / sdk.RECEIPT).write_text(json.dumps(receipt), encoding="utf-8")
 
     def test_clean_prefix_verifies(self):
-        self.assertEqual(sdk.verify(self.prefix, self.pins), [])
+        self.assertEqual(self.verify(), [])
 
     def test_changed_file_fails(self):
         (self.prefix / "lib" / "a.lib").write_bytes(b"two")
-        self.assertEqual(sdk.verify(self.prefix, self.pins), ["changed: lib/a.lib"])
+        self.assertEqual(self.verify(), ["changed: lib/a.lib"])
 
     def test_missing_file_fails(self):
         (self.prefix / "lib" / "a.lib").unlink()
-        self.assertEqual(sdk.verify(self.prefix, self.pins), ["missing: lib/a.lib"])
+        self.assertEqual(self.verify(), ["missing: lib/a.lib"])
 
     def test_added_file_fails(self):
         (self.prefix / "lib" / "b.lib").write_bytes(b"new")
-        self.assertEqual(sdk.verify(self.prefix, self.pins), ["unexpected: lib/b.lib"])
+        self.assertEqual(self.verify(), ["unexpected: lib/b.lib"])
 
     def test_changed_pins_make_the_sdk_stale(self):
         self.pins.write_text('{"x":1}', encoding="utf-8")
-        self.assertIn("stale", sdk.verify(self.prefix, self.pins)[0])
+        self.assertIn("stale", self.verify()[0])
+
+    def test_changed_observation_header_makes_the_sdk_stale(self):
+        self.header.write_text("two", encoding="utf-8")
+        self.assertIn("stale", self.verify()[0])
+
+    def test_changed_sdk_config_makes_the_sdk_stale(self):
+        (self.native / "sdk/SkyrimNativeSdkConfig.cmake").write_text("y", encoding="utf-8")
+        self.assertIn("stale", self.verify()[0])
 
     def test_no_receipt_fails(self):
         (self.prefix / sdk.RECEIPT).unlink()
-        self.assertIn("no receipt", sdk.verify(self.prefix, self.pins)[0])
+        self.assertIn("no receipt", self.verify()[0])
 
     def test_unreadable_receipt_fails(self):
         (self.prefix / sdk.RECEIPT).write_text("{", encoding="utf-8")
-        self.assertIn("unreadable", sdk.verify(self.prefix, self.pins)[0])
+        self.assertIn("unreadable", self.verify()[0])
 
 
 class GameRoot(unittest.TestCase):

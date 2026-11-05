@@ -87,6 +87,8 @@ PYTHON_MUTANTS = [
      "test_different_baseline_refuses"),
     ("stale-pins-accepted", "test_sdk", SDK, [("    if receipt.get(\"pins_sha256\") != sha256(pins_path):\n", "    if False:\n")],
      "test_changed_pins_make_the_sdk_stale"),
+    ("stale-sources-accepted", "test_sdk", SDK, [("    if receipt.get(\"sources_sha256\") != sources_digest(native):\n", "    if False:\n")],
+     "test_changed_observation_header_makes_the_sdk_stale"),
     ("added-file-ignored", "test_sdk", SDK, [("        elif name not in recorded:\n            problems.append(\"unexpected: \" + name)\n", "")],
      "test_added_file_fails"),
     ("game-root-allowed", "test_sdk", SDK, [("        if (folder / \"SkyrimVR.exe\").exists() or (folder / \"SkyrimSE.exe\").exists():\n            raise Refused(\"{} is inside", "        if False:\n            raise Refused(\"{} is inside")],

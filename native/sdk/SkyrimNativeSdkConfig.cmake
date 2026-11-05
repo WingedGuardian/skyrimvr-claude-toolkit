@@ -19,9 +19,10 @@ target_link_libraries(SkyrimNativeSdk::MinHook INTERFACE minhook::minhook)
 target_include_directories(SkyrimNativeSdk::Observation INTERFACE "${_skn_prefix}/observation/include")
 set(SkyrimNativeSdk_OBSERVATION_DIR "${_skn_prefix}/observation" CACHE INTERNAL "")
 
-# skyrim_native_add_bridges(<target> <consumer bridges.asm>): the consumer's asm INCLUDEs bridge_common.inc.
+# skyrim_native_add_bridges(<target> <consumer bridges.asm>): the consumer's asm INCLUDEs bridge_common.inc. It assembles
+# in its own object library, because CommonLib's exported compile flags are C++ flags that MASM rejects.
 function(skyrim_native_add_bridges target asm)
-    target_sources(${target} PRIVATE "${asm}")
-    set_source_files_properties("${asm}" TARGET_DIRECTORY ${target} PROPERTIES
-        COMPILE_OPTIONS "/I${SkyrimNativeSdk_OBSERVATION_DIR}/asm;/WX")
+    add_library(${target}_bridges OBJECT "${asm}")
+    target_compile_options(${target}_bridges PRIVATE "/I${SkyrimNativeSdk_OBSERVATION_DIR}/asm" /WX)
+    target_sources(${target} PRIVATE $<TARGET_OBJECTS:${target}_bridges>)
 endfunction()
