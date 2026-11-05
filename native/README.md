@@ -138,7 +138,28 @@ Limits, stated plainly:
 - The marker and slots are cooperative. Deleting the marker by hand, with no `slots` in the profile, lets a second context start.
 - Root size has no limit: `check` reports the file count and bytes, so read them.
 - Saves are out of scope. Pair protection stays with the save guard and the guarded named-load route.
-- Not yet qualified against a real session: see the status in the handback.
+
+## Real-game result (2026-11-05)
+
+One headless Skyrim VR 1.4.15 session, private desktop, on a modded install with PLANCK and HIGGS, loading a writer-disabled test
+save. The example DLL, built from a cold-clone SDK, observed `hkbRagdollDriver` post-physics at RVA `A27730`.
+
+| Claim | Evidence |
+|---|---|
+| DLL loads and the bridge installs on live code | Log: `hook live at rva a27730; retained=true` at input-loaded |
+| Calls are captured | 44,102 before and 44,102 after over about 2 minutes |
+| Before and after stay paired | Equal at all 60 five-second reports |
+| The game keeps working | Frames advanced throughout; orderly exit; no crash log or Windows fault event |
+| The test context works on real state | 287 files restored, including a SkyrimNet database that really changed; a separate re-hash found 0 differences |
+
+What this does not show:
+
+- It is one site in one session. It does not qualify any other site: each consumer still owes its own evidence, above.
+- Equal counts are strong evidence of exactly-once, not per-call proof. They were read between calls by a passive counter, and a
+  matched pair says nothing about register state in the game. That part rests on the offline tests.
+- PLANCK hooks the call that reaches this function. Both worked in the same session, but nothing here traced a call through both.
+- Headless has no real headset pose, and the overhead was not measured.
+- The hook is never removed while the game runs, so unhooking at runtime stays untested by design.
 
 ## Tests
 
