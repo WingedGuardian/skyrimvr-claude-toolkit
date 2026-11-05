@@ -57,6 +57,9 @@ EXCLUDE = ("tests", ".github", "scripts/layer2-spike", "tools/resaver-cli/tests"
 EXCLUDE += ("docs/superpowers",)
 # docs/REVIEW-SCOPE.md is the maintainer's release-review scope note (final sweep 2026-10-25): same ruling, never shipped.
 EXCLUDE += ("docs/REVIEW-SCOPE.md",)
+# native/ is the maintainer-only SKSEVR SDK contract and observation tooling. It fetches GPL and third-party source on the
+# maintainer's machine; nothing under it is an end-user requirement, so it never ships (user ruling 2026-11-04).
+EXCLUDE += ("native",)
 
 
 def is_excluded(path: str) -> bool:

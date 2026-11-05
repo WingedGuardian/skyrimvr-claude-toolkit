@@ -1,0 +1,8 @@
+OPTION CASEMAP:NONE
+EXTERN SkyrimNativeOriginal0:QWORD
+EXTERN SkyrimNativeOriginal1:QWORD
+INCLUDE bridge_common.inc
+.code
+BRIDGE SkyrimNativeWrapper0,SkyrimNativeOriginal0,0
+BRIDGE SkyrimNativeWrapper1,SkyrimNativeOriginal1,1
+END

@@ -1,0 +1,36 @@
+name: Native SDK
+# Maintainer-only native tooling: real MSVC link, ABI, unwind and mutation checks. Separate from the toolkit's full
+# qualification, which never builds this. Synthetic fixtures only: no game, no game bytes.
+on:
+  push:
+    branches: [feat/native-observation]
+    paths:
+      - "native/**"
+      - ".github/workflows/native.yml"
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: SDK build, link and native tests
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Portable contract tests
+        run: python -m unittest discover -s native/tests -p "test_*.py"
+      - name: Build, verify and link-qualify the SDK from nothing
+        shell: bash
+        run: |
+          export VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT"
+          python native/sdk/sdk.py build --prefix "C:/s/p" --work "C:/s/w" --jobs 4
+          python native/sdk/sdk.py verify --prefix "C:/s/p"
+          python native/sdk/sdk.py qualify --prefix "C:/s/p" --work "C:/s/w"
+      - name: Native tests and mutants
+        shell: bash
+        run: python native/tests/mutations.py --prefix "C:/s/p" --work "C:/s/m"

@@ -1,0 +1,16 @@
+{
+ "repository": "game-root install repo (private)",
+ "revision": "5f10be34",
+ "base": "tools/skyrim-souls-vr/diagnostic/",
+ "files_sha256": {
+  "src/bridge_common.inc": "429934d1e918b24f176bba22eaef54aeb9260f83f0ce20b4387f4f73241f5018",
+  "src/context.hpp": "4255870b8289642e48edfe2e589f26cba7acb0a4a629006f2e126e75ca80647f",
+  "src/xstate.hpp": "b6249ce81437f6dc18fa3f4bef49d8e8adb4b50a400693bbbf315a967d7f841a",
+  "src/route.hpp": "9b7c2ace43a282e0885ec071c42406fad789861b78f0c4ec0cfbca68590be7af",
+  "src/forward.hpp": "d2ec2784ed66b8e99bf07794f3b1c211bc34c5d839fdc4caf717c1ff65e46f47",
+  "tests/bridge_tests.cpp": "08a0ec106df82403bd58e0593dcfb15e8986acfad87b7592affdc4316afc8ab7",
+  "tests/capture.asm": "8c90243c0deeb46f45d0b90f1c9c9198670551cf41c497f05a25a59beb279da3",
+  "tests/entry_abi.asm": "e0f99bd05c44195d5691cfe9dbabbd2c3af3648d9a2af6979d519a8596cc9e0b"
+ },
+ "note": "Renamed; phase variants removed from bridge_tests.cpp."
+}

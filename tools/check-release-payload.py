@@ -135,6 +135,7 @@ CORE_REQUIRED = (
 ABSENT_PATHS = (
     "tests",
     "tests/fixtures/routes-harness",
+    "native",                  # maintainer-only SKSEVR SDK and observation tooling (scripts/build_release_zip.py)
     ".github",
     "scripts/layer2-spike",    # Plan 6 Layer 2 lock research probes: developer-only, kept in the repo, never shipped
     "scripts/guard-corpus",    # guard-corpus tooling and the latency gate read tests/guard_corpus/: maintainer-only

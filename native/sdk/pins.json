@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "commonlib": {
+    "repo": "https://github.com/alandtse/CommonLibVR.git",
+    "tag": "v15.6.0",
+    "commit": "cce63b4c8aacd2766c21f44b408df92a3ad9e95c",
+    "openvr_submodule_commit": "60eb187801956ad277f1cae6680e3a410ee0873b",
+    "vcpkg_baseline": "00c5775211f45cd08b37fce0484b4cb940e422ab",
+    "preset": "build-release-msvc-vcpkg-vr",
+    "cmake_args": [
+      "-DBUILD_TESTS=OFF",
+      "-DVCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON",
+      "-DSKSE_SUPPORT_XBYAK=ON"
+    ],
+    "license": "GPL-3.0-or-later WITH Modding Exception AND GPL-3.0 Linking Exception"
+  },
+  "minhook": {
+    "repo": "https://github.com/TsudaKageyu/minhook.git",
+    "tag": "v1.3.4",
+    "commit": "c3fcafdc10146beb5919319d0683e44e3c30d537",
+    "license": "BSD-2-Clause, with BSD-2-Clause Hacker Disassembler Engine notices"
+  },
+  "triplet": "x64-windows-static-md",
+  "packages": {
+    "SimpleIni": "4.26",
+    "directxmath": "2026-06-12",
+    "directxtk": "2026-05-07#1",
+    "fmt": "12.2.0#1",
+    "nlohmann-json": "3.12.0#2",
+    "rapidcsv": "8.99",
+    "spdlog": "1.17.0#1",
+    "toml11": "4.4.0",
+    "vcpkg-cmake": "2025-08-07",
+    "vcpkg-cmake-config": "2026-07-21",
+    "xbyak": "7.28"
+  },
+  "tested_with": {
+    "msvc_toolset": "14.44.35207",
+    "note": "MSVC output is not byte-reproducible; the receipt identifies each build by its own file hashes."
+  },
+  "runtime_requirements": [
+    "Skyrim VR 1.4.15",
+    "SKSEVR 2.0.12",
+    "VR Address Library (Data/SKSE/Plugins/version-1-4-15-0.csv)"
+  ],
+  "development_requirements": [
+    "Windows x64",
+    "git",
+    "Python 3.10+",
+    "Visual Studio 2022 Build Tools with MSVC v143 and bundled CMake and Ninja",
+    "vcpkg (tool only, from VCPKG_ROOT)"
+  ]
+}
