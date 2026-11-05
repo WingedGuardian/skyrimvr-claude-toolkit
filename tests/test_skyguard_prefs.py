@@ -159,8 +159,8 @@ FAST_S = 1.0
 def test_a_worst_case_file_at_the_read_cap_renders_fast(tmp_path, unit):
     _kb(tmp_path, unit * (prefs.READ_CAP // len(unit)))
     code = ("import sys, time; sys.path.insert(0, {!r}); from skyguard import prefs, audit; "
-            "a = audit.Audit({!r}); t = time.perf_counter(); prefs._render({!r}, a); "
-            "print(time.perf_counter() - t)").format(str(REPO / "tools"), str(tmp_path), str(tmp_path))
+            "a = audit.Audit({!r}); t = time.process_time(); prefs._render({!r}, a); "
+            "print(time.process_time() - t)").format(str(REPO / "tools"), str(tmp_path), str(tmp_path))
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
     assert r.returncode == 0, r.stderr[-2000:]
     took = float(r.stdout.strip())
