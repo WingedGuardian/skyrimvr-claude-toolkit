@@ -44,16 +44,18 @@ struct CaptureGate {
     // Hot path. The first check is a fast refusal that leaves the count alone: a hot function hammering a stopped gate must
     // not keep the count above zero, or drained() would never converge. A producer then registers before the check that
     // counts, so disarm-then-drained() cannot miss one that was admitted.
-    bool enter(std::uint64_t now) noexcept {
-        if (!admits(now)) return false;
+    bool enter(std::uint64_t now) noexcept { return admits(now) && countThenRecheck(now); }
+    // The second half of enter(), apart so a test can reach the case a stop lands between the two checks.
+    bool countThenRecheck(std::uint64_t now) noexcept {
         active.fetch_add(1, std::memory_order_seq_cst);
         if (admits(now)) return true;
         active.fetch_sub(1, std::memory_order_release);
         return false;
     }
     void leave() noexcept { active.fetch_sub(1, std::memory_order_release); }
-    // Meaningful only after disarm() or preload(): true then means every admitted producer has left. If it stays false at
-    // the deadline, report the capture as incomplete, never as complete.
+    // Meaningful only after disarm() or preload(): true then means every admitted producer has left. A producer being
+    // refused can make a later read false for an instant, so stop at the first true. If it stays false at the deadline,
+    // report the capture as incomplete, never as complete.
     bool drained() const noexcept { return active.load(std::memory_order_seq_cst) == 0; }
 };
 

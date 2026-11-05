@@ -1,12 +1,21 @@
 #include "skyrim_native/capture_gate.hpp"
+#include <windows.h>
 #include <chrono>
 #include <cstdio>
+#include <new>
 #include <thread>
 #include <vector>
 
 namespace {
 unsigned checks{}, failures{};
 void check(bool pass, const char* name) { ++checks; if (!pass) { ++failures; std::printf("FAIL %s\n", name); } }
+
+// Returns true only if enter() refused without faulting. Apart from main because __try cannot share a function with
+// objects that need unwinding.
+bool refusedWithoutWriting(skyrim_native::CaptureGate* gate) {
+    __try { return !gate->enter(1); }
+    __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) { return false; }
+}
 }
 using namespace skyrim_native;
 
@@ -45,11 +54,30 @@ int main() {
     gate.disarm();
     check(!gate.drained(), "disarm does not claim a drain while a producer is inside");
     check(!gate.enter(101) && !gate.drained(), "no new producer after disarm, and refused entry leaves the count alone");
+    check(!gate.countThenRecheck(101) && !gate.drained(), "a producer that counts itself after the stop is refused and uncounted");
     check(!gate.arm(gate.ticket(), 100, 30), "no new capture while an earlier producer is still inside");
     gate.leave();
     check(gate.drained(), "drain completes when the admitted producer leaves");
     check(gate.arm(gate.ticket(), 100, 30), "a new capture arms once drained");
     gate.disarm();
+
+    // A refused entry must write nothing. A stopped gate on a read-only page faults on any write, so this needs no race:
+    // a hot function hammering a stopped gate cannot hold the count above zero, or contend for its cache line.
+    {
+        void* page = VirtualAlloc(nullptr, sizeof(CaptureGate), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        check(page != nullptr, "read-only gate page allocated");
+        if (page) {
+            auto* frozen = new (page) CaptureGate;
+            frozen->loaded();
+            check(frozen->arm(frozen->ticket(), 0, 10), "read-only gate arms before it is frozen");
+            frozen->disarm();
+            DWORD old = 0;
+            check(VirtualProtect(page, sizeof(CaptureGate), PAGE_READONLY, &old) != 0, "gate page made read-only");
+            check(refusedWithoutWriting(frozen), "a refused entry writes nothing to the gate");
+            VirtualProtect(page, sizeof(CaptureGate), PAGE_READWRITE, &old);
+            VirtualFree(page, 0, MEM_RELEASE);
+        }
+    }
 
     bool published = false, failed = false;
     const bool retained = lifetimeStart([&] { published = true; return true; }, [] { throw 7; }, [&] { failed = true; });
@@ -84,9 +112,11 @@ int main() {
             });
         while (admitted.load(std::memory_order_relaxed) < 8) {}
         race.disarm();
-        const auto giveUp = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (!race.drained() && std::chrono::steady_clock::now() < giveUp) {}
-        if (!race.drained()) {
+        // Stop at the first true read: a producer being refused may briefly show in a later one.
+        const auto giveUp = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        bool drainedInTime = false;
+        while (!(drainedInTime = race.drained()) && std::chrono::steady_clock::now() < giveUp) {}
+        if (!drainedInTime) {
             check(false, "a stopped capture drains");
             stop = true;
             for (auto& p : producers) p.join();
