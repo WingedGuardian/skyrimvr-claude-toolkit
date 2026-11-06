@@ -1,4 +1,4 @@
-# release 4.0.0
+# release 4.1.0
 10bbc21a4d2b35ce9c0787e0df4d9008a2b537910f42b7e0cd1a2ae14ed6cf87  .claude/hooks/backup-before-edit.sh
 bcfc1f9d7d462363de2bb3a9d1d697ff8ef9fd5071cd85b376875d6f5ed16534  .claude/hooks/protect-bash.sh
 fc9a7e33e68cff1a13ee75a1f833cb40089df25af891df8d2dc79974ee684482  .claude/hooks/protect-files.sh
