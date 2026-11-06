@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -29,6 +31,99 @@ def load_config(root):
     return config
 
 
+# The FormIDs a frozen @file list names, kept beside the backend's own `formids` so the gateway can derive
+# its permitted edit set. Removed before the backend call; recorded in the receipt.
+FROZEN_FORMIDS = "_gateway_formids"
+
+
+def _refuse_list(label, why):
+    raise Refusal(label + "=" + why + " Accepted list files: a JSON array of FormIDs, a plain list (one "
+                  "XXXXXX:Plugin.esp per line or comma-separated), or a House Carl result artifact (.jsonl).")
+
+
+def _formid_tokens(content, label, path):
+    """House Carl 2.1.2's @file grammar for a FormID list (Artifacts.ExpandListInput, ResultArtifact.ReadIdentity):
+    a result artifact (line 1 is a manifest carrying `housecarl_artifact`; error rows skipped) or a plain list
+    split on commas and line breaks, with brackets, quotes and blanks stripped per token."""
+    first = re.split(r"[\r\n]", content, maxsplit=1)[0].lstrip("﻿ \t")
+    manifest = None
+    if first.startswith("{"):
+        try:
+            parsed = json.loads(first)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict) and "housecarl_artifact" in parsed:
+            manifest = parsed
+    if manifest is None:
+        tokens = [t.strip("[]\"' \t") for t in re.split(r"[,\r\n]", content)]
+        tokens = [t for t in tokens if t]
+        if not tokens:
+            _refuse_list(label, "@" + path + " is empty.")
+        return tokens
+    identity = manifest.get("identity")
+    if not isinstance(identity, str) or identity.casefold() != "formid":
+        _refuse_list(label, "@" + path + " is a result artifact whose rows carry " + repr(identity)
+                     + " identities, not FormIDs.")
+    tokens = []
+    for number, line in enumerate(content.splitlines()[1:], start=2):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            _refuse_list(label, "@" + path + " line " + str(number) + " is not a JSON row; regenerate the artifact.")
+        if not isinstance(row, dict):
+            _refuse_list(label, "@" + path + " line " + str(number) + " is not a JSON object row.")
+        if "error" in row:
+            continue        # a failed input of the producing call names no record
+        if not isinstance(row.get(identity), str):
+            _refuse_list(label, "@" + path + " line " + str(number) + " carries no '" + identity + "' value.")
+        tokens.append(row[identity])
+    if not tokens:
+        _refuse_list(label, "@" + path + " has no record rows.")
+    return tokens
+
+
+def _freeze_formid_list(token, label, config):
+    """Read one @file FormID list once, freeze its exact bytes under the state folder and return
+    (frozen path, FormIDs). The backend re-reads the frozen copy, so its own artifact epoch check still runs."""
+    path = token.strip()[1:].strip().strip("\"'")
+    if not path:
+        _refuse_list(label, "'@' names no file.")
+    source = Path(path)
+    if not source.is_absolute():
+        _refuse_list(label, "@" + path + " must be an absolute path.")
+    try:
+        raw = source.read_bytes()
+        content = raw.decode("utf-8-sig")
+    except (OSError, UnicodeDecodeError) as exc:
+        _refuse_list(label, "@" + path + " could not be read (" + type(exc).__name__ + ").")
+    tokens = _formid_tokens(content, label, path)
+    digest = hashlib.sha256(raw).hexdigest()
+    inputs = Path(config["state_dir"]) / "inputs"
+    inputs.mkdir(parents=True, exist_ok=True)
+    frozen = inputs / (digest + (".jsonl" if content.lstrip("﻿ \t").startswith("{") else ".txt"))
+    if not frozen.exists():
+        temp = inputs / (digest + "." + uuid.uuid4().hex + ".tmp")
+        temp.write_bytes(raw)
+        os.replace(temp, frozen)
+    if hashlib.sha256(frozen.read_bytes()).hexdigest() != digest:
+        raise Refusal("A frozen input in " + str(inputs) + " does not match its name; remove it and retry.")
+    return frozen, tokens
+
+
+def _json_manifest(value, key):
+    path = value[1:].strip().strip("\"'")
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    except OSError as exc:
+        raise Refusal(key + "=@" + path + " could not be read (" + type(exc).__name__ + ").") from None
+    except ValueError as exc:
+        raise Refusal(key + "=@" + path + " must be a JSON document (" + str(exc) + "). Only formids= also takes "
+                      "plain lists and result artifacts.") from None
+
+
 def check_arguments(name, arguments, config):
     if name not in READS | WRITES | {"toolkit_housecarl_status"}:
         raise Refusal("This integration does not expose " + name + "; use the existing toolkit workflow.")
@@ -45,18 +140,20 @@ def check_arguments(name, arguments, config):
                     c in patch for c in '/\\:<>"|?*\r\n\0') or patch in (".", ".."):
                 raise Refusal("patch must be a base filename, without a path or wildcard.")
         # Freeze manifests into the transaction request before deriving its permitted edit set.
-        for key in ("ops", "assignments", "records", "formids"):
+        for key in ("ops", "assignments", "records"):
             value = a.get(key)
             if isinstance(value, str) and value.startswith("@"):
-                a[key] = json.loads(Path(value[1:]).read_text(encoding="utf-8-sig"))
-            elif key == "formids" and isinstance(value, list):
-                expanded = []
-                for token in value:
-                    if isinstance(token, str) and token.startswith("@"):
-                        expanded.extend(json.loads(Path(token[1:]).read_text(encoding="utf-8-sig")))
-                    else:
-                        expanded.append(token)
-                a[key] = expanded
+                a[key] = _json_manifest(value, key)
+        # A FormID @file follows House Carl's own grammar (issue 20): one @file stands in place of the whole list.
+        value = a.get("formids")
+        items = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+        if any(isinstance(t, str) and t.lstrip().startswith("@") for t in items):
+            if len(items) != 1:
+                _refuse_list("formids", "mixes an '@file' entry with inline entries; '@<path>' stands in place of "
+                             "the whole list. Pass it alone, or put every entry in the file.")
+            frozen, tokens = _freeze_formid_list(items[0], "formids", config)
+            a["formids"] = ["@" + str(frozen)]
+            a[FROZEN_FORMIDS] = tokens
     if name == "housecarl_copy" and a.get("into"):
         raise Refusal("Closure copy currently supports a new patch only; existing-patch copy is not qualified.")
     if name == "housecarl_load_order_status":
@@ -212,7 +309,7 @@ def staged_patches(state_dir, name):
 
 
 def allowed_records(arguments):
-    keys = set(arguments.get("formids") or [])
+    keys = set(arguments.get(FROZEN_FORMIDS) or arguments.get("formids") or [])
     ops = arguments.get("ops")
     if isinstance(ops, list):
         keys |= {o.get("formid", "") for o in ops if isinstance(o, dict)}
@@ -257,6 +354,7 @@ class Gateway:
         work = Path(config["state_dir"]) / "transactions" / ident
         work.mkdir(parents=True)
         a = copy.deepcopy(arguments)
+        a.pop(FROZEN_FORMIDS, None)      # gateway-only; the backend reads the frozen @file itself
         target_name = a.get("in_place") or a.get("into")
         if a.get("in_place") and a.get("into"):
             raise Refusal("Choose one write lane.")

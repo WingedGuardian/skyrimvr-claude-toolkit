@@ -1,5 +1,9 @@
 # Changelog
 
+## v4.1.0 — unreleased
+
+- House Carl write tools (`housecarl_forward`, `housecarl_remove` and the others) accept the same `formids=@file` forms House Carl does: a JSON array, a plain list with one `XXXXXX:Plugin.esp` per line or comma-separated, and a House Carl result artifact (`.jsonl`, error rows skipped). The gateway freezes the file's exact bytes under `.skyguard/housecarl/inputs/` and hands House Carl that copy, so House Carl's own check that an artifact matches the current build still runs. A file it cannot use, an `@file` mixed with inline FormIDs, or a relative path gets a refusal naming the accepted forms instead of a raw JSON error. `ops=`, `assignments=` and `records=` files must still be JSON, and now say so (#20).
+
 ## v4.0.0 — 2026-11-05
 
 - Save guard: a save named in capitals (`MAIN.ESS`) is no longer missed by `cp --parents` or `rsync -R`.

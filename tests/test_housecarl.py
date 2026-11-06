@@ -711,3 +711,102 @@ def test_a_backend_set_up_for_another_version_is_named_not_reported_as_the_pin(t
     with pytest.raises(Refusal, match="Incomplete installed-backend"):      # the current pin goes on to the next check
         runtime.verify_installation({"server": str(tmp_path / "housecarl-mcp.exe"), "server_hashes": {},
                                      "upstream_version": UPSTREAM_VERSION})
+
+
+# ---- issue 20: @file FormID lists on write tools follow House Carl's own grammar ------------------------------
+
+_ARTIFACT = ('{"housecarl_artifact":1,"tool":"housecarl_records","identity":"formid","epoch":"e1","row_count":3}\n'
+             '{"formid":"012EB7:Skyrim.esm","name":"a"}\n{"error":"no such record","input":"FFFFFF:Skyrim.esm"}\n'
+             '\n{"formid":"000800:Sword.esp"}\n')
+
+
+@pytest.mark.parametrize("name,content,expected", [
+    ("ids.txt", "012EB7:Skyrim.esm\r\n000800:Sword.esp\n\n", ["012EB7:Skyrim.esm", "000800:Sword.esp"]),
+    ("ids.csv", "012EB7:Skyrim.esm, 000800:Sword.esp", ["012EB7:Skyrim.esm", "000800:Sword.esp"]),
+    ("ids.json", '["012EB7:Skyrim.esm", "000800:Sword.esp"]', ["012EB7:Skyrim.esm", "000800:Sword.esp"]),
+    ("result.jsonl", _ARTIFACT, ["012EB7:Skyrim.esm", "000800:Sword.esp"]),
+    ("bom.txt", "\ufeff012EB7:Skyrim.esm\n", ["012EB7:Skyrim.esm"]),
+])
+@pytest.mark.parametrize("spelling", ["list", "string"])
+def test_formid_files_are_frozen_and_name_the_edit_set(install, name, content, expected, spelling):
+    source = Path(install["root"]) / name
+    source.write_bytes(content.encode("utf-8"))
+    token = "@" + str(source)
+    args = gateway.check_arguments("housecarl_forward", {"formids": [token] if spelling == "list" else token}, install)
+    frozen = Path(args["formids"][0][1:])
+    assert len(args["formids"]) == 1 and args["formids"][0].startswith("@")
+    assert frozen.parent == Path(install["state_dir"]) / "inputs" and frozen.read_bytes() == source.read_bytes()
+    assert args[gateway.FROZEN_FORMIDS] == expected
+    assert gateway.allowed_records(args) == {t.casefold().lstrip("0") for t in expected}
+    source.write_text("FFFFFF:Skyrim.esm\n")            # a later edit of the caller's file cannot reach the transaction
+    assert frozen.read_bytes() == content.encode("utf-8")
+
+
+@pytest.mark.parametrize("content,match", [
+    ("", "is empty"),
+    ('{"housecarl_artifact":1,"identity":"path"}\n{"path":"meshes/a.nif"}\n', "'path' identities"),
+    ('{"housecarl_artifact":1,"identity":null}\n{"count":3}\n', "None identities"),
+    ('{"housecarl_artifact":1,"identity":"formid"}\n{"error":"x"}\n', "no record rows"),
+    ('{"housecarl_artifact":1,"identity":"formid"}\nnot json\n', "line 2 is not a JSON row"),
+    ('{"housecarl_artifact":1,"identity":"formid"}\n{"name":"x"}\n', "carries no 'formid' value"),
+])
+def test_unusable_formid_files_get_a_gateway_refusal(install, content, match):
+    source = Path(install["root"]) / "bad.jsonl"
+    source.write_text(content, encoding="utf-8")
+    with pytest.raises(Refusal, match=match) as caught:
+        gateway.check_arguments("housecarl_forward", {"formids": ["@" + str(source)]}, install)
+    assert "Accepted list files" in str(caught.value)
+
+
+def test_formid_file_spelling_errors_are_refusals(install):
+    source = Path(install["root"]) / "ids.txt"
+    source.write_text("012EB7:Skyrim.esm\n")
+    for formids, match in ((["@" + str(source), "000800:Sword.esp"], "mixes an '@file' entry"),
+                           (["@" + str(source), "@" + str(source)], "mixes an '@file' entry"),
+                           (["@ids.txt"], "absolute path"), (["@"], "names no file"),
+                           (["@" + str(source) + ".missing"], "could not be read")):
+        with pytest.raises(Refusal, match=match):
+            gateway.check_arguments("housecarl_remove", {"formids": formids}, install)
+
+
+@pytest.mark.parametrize("key", ["ops", "assignments", "records"])
+def test_non_json_manifest_files_are_refused_by_name_not_as_a_decode_error(install, key):
+    source = Path(install["root"]) / "ops.txt"
+    source.write_text("012EB7:Skyrim.esm\n")
+    with pytest.raises(Refusal, match=key + r"=@.* must be a JSON document"):
+        gateway.check_arguments("housecarl_apply", {key: "@" + str(source)}, install)
+
+
+def test_reads_pass_formid_files_through_untouched(install):
+    args = gateway.check_arguments("housecarl_records", {"formids": ["@C:/anywhere/ids.txt"]}, install)
+    assert args["formids"] == ["@C:/anywhere/ids.txt"] and gateway.FROZEN_FORMIDS not in args
+
+
+def test_the_backend_receives_the_frozen_file_not_the_gateway_key(install, monkeypatch):
+    from types import SimpleNamespace
+    source = Path(install["root"]) / "result.jsonl"
+    source.write_text(_ARTIFACT, encoding="utf-8")
+    seen = []
+
+    class FakeBackend:
+        def __init__(self, config, snapshot, work):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def call(self, name, args):
+            seen.append((name, args))
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text=json.dumps({"ok": True}))])
+
+    monkeypatch.setattr(gateway, "Backend", FakeBackend)
+    out = asyncio.run(gateway.Gateway(install).call("housecarl_forward", {
+        "patch": "Fwd.esp", "source": "Sword.esp", "formids": ["@" + str(source)], "dry_run": True}))
+    assert out["dry_run"] is True
+    (name, args), = seen
+    assert gateway.FROZEN_FORMIDS not in args
+    frozen = Path(args["formids"][0][1:])
+    assert frozen.parent == Path(install["state_dir"]) / "inputs" and frozen.read_text(encoding="utf-8") == _ARTIFACT
