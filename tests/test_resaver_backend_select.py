@@ -27,7 +27,7 @@ JAVA_MISSING = "ReSaver.jar not found"
 def kit(tmp_path):
     tools = tmp_path / "tools"
     (tools / "resaver-cli").mkdir(parents=True)
-    for name in ("resaver-cli.sh", "resaver_native.py", "resaver_cli_cache.py"):
+    for name in ("resaver-cli.sh", "resaver_native.py", "resaver_stock.py", "resaver_cli_cache.py"):
         shutil.copy2(REPO / "tools" / name, tools / name)
     (tools / "resaver-plus").mkdir()
     build = tmp_path / "build"

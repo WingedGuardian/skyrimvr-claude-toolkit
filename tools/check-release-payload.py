@@ -102,6 +102,7 @@ CORE_REQUIRED = (
     # the Apache-2.0 LICENSE and NOTICE (with the modification notice) and the CLI build's third-party notices ship
     # with every copy of the patch set (tools/resaver-plus/NOTICE.md).
     "tools/resaver_native.py",
+    "tools/resaver_stock.py",       # v4.1.0: its stock tier; the adapter imports it on every call
     "tools/resaver-plus.py",
     "tools/resaver-plus/build.py",
     "tools/resaver-plus/SOURCE-SHA256",

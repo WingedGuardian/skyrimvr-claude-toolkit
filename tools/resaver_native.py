@@ -17,7 +17,13 @@ Nothing here falls back to the Java backend: a refusal or failure is an error, a
     file, leave the input pair untouched and carry the input's co-save bytes (or its absence) over unchanged. Any
     mismatch is an error and the candidate output is left in place for inspection, never deleted.
 
-Exit: 0 ok | 2 refused or failed (the JSON on stdout says why).
+Stock tier (v4.1.0, tools/resaver_stock.py): with no BUILD-INFO.json, the user's own unpatched resaverpp-cli.exe named
+by RESAVER_EXE or tools/resaver-plus/stock-exe, any upstream version. Its --help decides what it can do; text passes
+through. Writes (clean, reset-havok, cleanse-formlists) take the same new-output admission and pair backups, but a
+stock build cannot preview or verify a change: the result says so. A BUILD-INFO.json that does not admit its build is
+an error, never a quiet switch to stock.
+
+Exit: 0 ok | 2 refused or failed | 3 this ReSaver version cannot do it (the JSON on stdout says why).
 """
 from __future__ import annotations
 
@@ -321,6 +327,109 @@ def project_result(op, result):
 IGNORED_IN_RECEIPT = {"apply", "dryRun", "wroteFile", "verified"}
 
 
+# ---- stock tier (v4.1.0): the user's own unpatched resaverpp-cli.exe, any upstream version (tools/resaver_stock.py)
+
+def tier():
+    """("enhanced", path, sha) for the tested patched build; ("stock", path, sha) for the configured stock build.
+
+    A BUILD-INFO.json that is present but does not admit its executable is an error, never a quiet switch to stock:
+    the user built the patched tier and something about it is wrong."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import resaver_stock
+    if (build_dir() / "BUILD-INFO.json").is_file():
+        path, sha = executable()
+        return "enhanced", path, sha
+    try:
+        stock = resaver_stock.configured_exe(ROOT, _test_mode())
+    except ValueError as exc:
+        raise Refused(str(exc))
+    if stock is None:
+        try:
+            build_info()                                   # raises the patched tier's own "not built" refusal
+        except Refused as exc:
+            raise Refused(str(exc) + "; or point RESAVER_EXE (or tools/resaver-plus/stock-exe) at your own "
+                          "resaverpp-cli.exe for the stock tier")
+        raise Refused("ReSaver Plus build folder changed during the call")
+    if os.name != "nt" and not _launcher():
+        raise Refused("the native backend runs on Windows only; use the Java backend on this OS")
+    return "stock", stock, digest(stock)
+
+
+def run_text(binary, args, expected_hash):
+    """Run a stock build: (exit code, stdout, stderr), decoded leniently. The executable is re-hashed first."""
+    if digest(binary) != expected_hash:
+        raise Refused("The ReSaver executable changed since this call started")
+    result = launch([*_launcher(), str(binary), *args])
+    return (result.returncode, result.stdout.decode("utf-8", errors="replace"),
+            result.stderr.decode("utf-8", errors="replace"))
+
+
+def _stock_fail(what, code, out, err):
+    tail = (err.strip() or out.strip())[-600:]
+    return RuntimeError("{} (exit {}){}".format(what, code, ": " + tail if tail else ""))
+
+
+def stock_main(argv, binary, sha, project):
+    import resaver_stock
+    code, text, err = run_text(binary, ["--help"], sha)
+    if code != 0:
+        raise _stock_fail("The ReSaver executable did not print its --help", code, text, err)
+    caps = resaver_stock.probe(text)
+    if not argv:
+        raise Refused("Expected an operation and one ESS input")
+    op = argv[0]
+    if op in resaver_stock.STOCK_READS:
+        if len(argv) < 2:
+            raise Refused("Expected one ESS input")
+        if any(a.startswith("--") for a in argv[2:]):
+            raise Refused(op + " takes no options on a stock build")
+        source = _ess(argv[1])
+        positions = list(argv[2:])
+        if op == "compare" and len(positions) == 1:
+            positions[0] = str(_ess(positions[0], "an existing second ESS input"))
+        try:
+            native = resaver_stock.plan_read(caps, op, source, positions)
+        except ValueError as exc:
+            raise Refused(str(exc))
+        code, text, err = run_text(binary, native, sha)
+        if code != 0:
+            raise _stock_fail("ReSaver could not do " + op, code, text, err)
+        return resaver_stock.result(caps, op, text)
+    if op in resaver_stock.STOCK_WRITES:
+        if "--apply" not in argv:
+            raise resaver_stock.CannotDo("a stock ReSaver build cannot preview a change; pass --apply with one new output "
+                                         "(the input pair is backed up first), or build the patched tier to preview")
+        op, source, output, _ = invocation(argv, project)      # the same new-output admission as the patched tier
+        flags = {a for a in argv[2:] if a.startswith("--") and a != "--apply"}
+        try:
+            native = resaver_stock.plan_write(caps, op, source, output, flags)
+        except ValueError as exc:
+            raise Refused(str(exc))
+        before = pair_hashes(source)
+        backups = backup(project, source, output, op)
+        code, text, err = run_text(binary, native, sha)
+        if pair_hashes(source) != before:
+            raise RuntimeError("Source pair changed during the operation; candidate output retained")
+        if code != 0:
+            raise _stock_fail("ReSaver did not complete " + op + "; any candidate output is retained", code, text, err)
+        if not output.is_file():
+            raise RuntimeError("ReSaver reported success but wrote no output")
+        if before[".skse"] is not None and not output.with_suffix(".skse").is_file():
+            raise RuntimeError("ReSaver wrote the .ess without its .skse co-save; candidate output retained. Copy the "
+                               "co-save yourself only if you know this edit leaves it valid")
+        reread, reread_text, reread_err = run_text(binary, [str(output)], sha)
+        if reread != 0:
+            raise _stock_fail("The same ReSaver build could not re-read its output; candidate output retained",
+                              reread, reread_text, reread_err)
+        out = resaver_stock.result(caps, op, text, wrote=True)
+        out.update(pairBackups=backups, inputHashes=before, outputHashes=pair_hashes(output), output=str(output))
+        return out
+    if op in FLAGS:
+        raise resaver_stock.CannotDo("{} needs the toolkit's patched ReSaver Plus build (structured output); build it with "
+                                     "`python tools/resaver-plus/build.py`".format(op))
+    raise Refused("Unknown operation: " + op)
+
+
 def main(argv=None, project=ROOT):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv == ["--help"]:
@@ -328,6 +437,23 @@ def main(argv=None, project=ROOT):
                           "usage": "resaver-cli.sh <operation> <input.ess> [arguments]",
                           "operations": sorted(FLAGS),
                           "writes": "explicit separate new output; preview before --apply; permanent pair backups"}))
+        return 0
+    kind, binary, binary_hash = tier()
+    if kind == "stock":
+        if argv == ["--verify"]:
+            import resaver_stock
+            code, text, err = run_text(binary, ["--help"], binary_hash)
+            if code != 0:
+                raise _stock_fail("The ReSaver executable did not print its --help", code, text, err)
+            caps = resaver_stock.probe(text)
+            print(json.dumps({"ok": True, "backend": "stock", "executable": str(binary), "sha256": binary_hash,
+                              "resaverVersion": caps["version"],
+                              "testedVersion": caps["version"] in resaver_stock.TESTED_VERSIONS,
+                              "reads": sorted(op for op, (needs, _) in resaver_stock.STOCK_READS.items()
+                                              if all(o in caps["options"] for o in needs)),
+                              "writes": sorted(resaver_stock.STOCK_WRITES)}))
+            return 0
+        print(json.dumps(stock_main(argv, binary, binary_hash, project), ensure_ascii=True, allow_nan=False))
         return 0
     if argv == ["--verify"]:
         path, sha = executable()
@@ -337,7 +463,6 @@ def main(argv=None, project=ROOT):
                           "tools": info.get("tools")}))
         return 0
     op, source, output, native = invocation(argv, project)
-    binary, binary_hash = executable()
     before = pair_hashes(source)
     backups = []
     preview = None
@@ -373,8 +498,14 @@ def main(argv=None, project=ROOT):
 
 
 def entry(argv=None, project=ROOT):
+    sys.path.insert(0, str(ROOT / "tools"))
+    import resaver_stock
     try:
         return main(argv, project)
+    except resaver_stock.CannotDo as exc:
+        print(json.dumps({"ok": False, "backend": "ReSaver Plus stock", "cannot": True, "error": str(exc)},
+                         allow_nan=False))
+        return resaver_stock.CAPABILITY_EXIT
     except (Refused, OSError, ValueError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         print(json.dumps({"ok": False, "backend": "ReSaver Plus native", "error": str(exc)}, allow_nan=False))
         return 2

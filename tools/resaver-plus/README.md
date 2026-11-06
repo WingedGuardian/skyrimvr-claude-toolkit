@@ -67,6 +67,28 @@ the choice. The chosen backend failing is an **error**; neither backend ever fal
 - The JSON is the native schema, close to but **not** identical to the Java driver's: same field names for the core
   counts, native wording for reports and warnings, native changeform trees. Do not diff it against Java output.
 
+### Your own unpatched build (stock tier, v4.1.0)
+
+ReSaver Plus changes almost daily, so the toolkit also works with whatever `resaverpp-cli.exe` you already have, from
+the Nexus zip or a build of any upstream version. With no `build/BUILD-INFO.json`, point `RESAVER_EXE` (or the one
+line in `tools/resaver-plus/stock-exe`) at that executable's absolute path and use `RESAVER_BACKEND=native` as above.
+
+- On every call the adapter reads that build's own `--help` and offers an operation only when the help lists every
+  option it needs. Anything else exits **3** with "this ReSaver version cannot do X"; it never guesses.
+  `bash tools/resaver-cli.sh verify` lists what your version can do.
+- Reads: `info` (the analysis report), `describe`, `quests [text]`, `journal`, `player`, `npcs [text]`,
+  `compare <other.ess>`, `crash-log <file>`, `path-idles`, `charged`, `spawned`. The tool's text is passed through
+  unparsed, as `text` in the JSON.
+- Writes: `clean` (`--unattached`, `--undefined`, `--terminate-threads`, at least one), `reset-havok` and
+  `cleanse-formlists`, each with `--apply` and one new output, after the same pair backups. **A stock build cannot
+  preview a change or verify its delta.** The adapter checks only that the input is unchanged, the output and its
+  co-save exist, and the same build re-reads the output without an error, and every write result says so. Load-test
+  the result in game. (User ruling 2026-11-05: stock builds may edit, with these checks.)
+- The structured operations (`find-refs`, `changeform`, `freeze-report`, `verify-roundtrip` and the others) need the
+  patched build and exit 3 on stock.
+- A version whose `--help` this toolkit has not read (it has read 51 and 56) still works and is marked
+  "untested version".
+
 The guard denies `resaverpp-cli.exe` run directly with a save-writing flag (`-o`, `--batch`, `--batch-all`,
 `--apply`) and any launch of the GUI (`ReSaverPP.exe`, which this build does not produce): rule
 S-RESAVER-NATIVE-DIRECT.
