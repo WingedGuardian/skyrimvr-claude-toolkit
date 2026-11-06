@@ -22,7 +22,7 @@ A living document of quirks, gotchas, and hard-won lessons about Skyrim modding 
 - For other objects (Topic Infos, Perks, persistent refs): `OnInit` fires at first load into the session
 - All properties and variables are reset to default values before `OnInit` fires
 - A quest script has no `OnLoad` event, and `OnLoad` on an ObjectReference means its 3D loaded, not that a save did — use `RegisterForSingleUpdate`/`OnUpdate` or `OnGameReload` for reload detection
-- SKSE's `ActiveMagicEffect.psc` declares the Actor events, including `OnRaceSwitchComplete`, so an ability's effect script can react to vampire turn, cure and Vampire Lord transform (all race swaps) without a ReferenceAlias script
+- `ActiveMagicEffect.psc` declares the Actor events (vanilla, not an SKSE addition), including `OnRaceSwitchComplete`, so an ability's effect script can react to vampire turn, cure and Vampire Lord transform (all race swaps) without a ReferenceAlias script
 - `OnInit` does NOT fire again after save/load (quest must be reset)
 
 **Persistence and Save/Load:**
@@ -2049,7 +2049,7 @@ a denominator can only account for what it was given. Match `crash-*.(txt|log)`
 case-insensitively, and keep the `crash-` prefix so the plugin's own `CrashLogger.log` is not
 counted as a crash.
 
-**Trainwreck** (Nexus 106440) names its dumps by timestamp only (`2026-10-22-22-14-42.log`, no `crash-` prefix) and writes them to `SKSE/Crashlogs/`. `crash-triage.py` reads that subfolder and that name shape; a `crash-*` glob finds none of them.
+**Trainwreck** (Nexus 106440) names its dumps by timestamp only (`2026-10-22-22-14-42.log`, no `crash-` prefix) and writes them to `SKSE/Crashlogs/`. A `crash-*` glob finds none of them, and that includes this toolkit's `crash-triage.py` (it matches `crash-*.txt`/`crash-*.log` in the SKSE folder only), so read Trainwreck dumps by hand.
 
 **First moves on a new CTD (measured 2026-11-02, AE 1.7.104).** Before porting or patching the plugin that changed last: (1) compare the crash signature with and without the suspect, and (2) check every active plugin's MAST records against `plugins.txt`. A CTD right after the main menu at `SkyrimSE.exe+1DCB60` (`mov rax,[rcx+0x30]`, called from `+2DF22B`, `rcx = [PlayerCharacter+0x40] + 0x30`, i.e. the player's base object is null) was identical with and without the blamed DLL; the cause was an enabled patch plugin whose master had been deleted. MO2 deleted it: installing an archive into an existing mod folder with **Replace** removes that folder's files first.
 
@@ -2074,6 +2074,23 @@ v4 retarget builds into a NEW folder, so move an existing copy across). BSArch a
 `extract --output` folder that does not exist yet (`EInvalidArguments: Folder does not exist`);
 create it first. **It lives under `bin/`, so any `dotnet build` or `clean` of AutoMod wipes
 it** — keep a canonical copy elsewhere and re-place it after a rebuild.
+
+Similarly, `audio wav-to-xwm` needs `xWMAEncode.exe`, which is not bundled. It is often simpler to call
+`xWMAEncode` directly than to go through AutoMod.
+
+**AutoMod on .NET 10 (v4, MEASURED 2026-10-05, v1.11.2 = e1c34ea, SDK 10.0.401 with no other SDK or
+runtime installed).** Upstream targets net8.0; `bash tools/automod-cli.sh --rebuild` pins SDK 10 in
+`tools/automod/global.json` and retargets `Directory.Build.props` to net10.0 (one line, a local
+patch), then builds the Cli project. It built with 0 errors (2 harmless NU1510 warnings) and on 10.0.12
+alone ran: `esp create`, `add-weapon` (dry-run and real), `add-spell/-armor/-global/-quest/-npc/-book/
+-perk/-faction`, `info`, `view-record`, `list-masters`; `nif info`; `archive list/create/extract`
+(byte-exact); `mcm create/add-toggle/validate`; `papyrus status/generate/validate/download/compile/
+decompile`; `audio info/create-fuz/extract-fuz` (byte-exact). Spriggit 0.41 read the AutoMod-written
+ESP and round-tripped it byte-identical. Upstream's unit tests: 68 of 69 pass on net10.0 — and the
+same 68 of 69 on net8.0: `ResultTests.ToJson_FailedResult_ContainsSuccessFalse` fails on both (a
+failed result's JSON omits `"success": false`), so it is upstream's, not .NET 10's. Rebuilding over an
+old net8.0 build needs no clean. A net8.0 build does NOT start on a 10-only machine without
+`DOTNET_ROLL_FORWARD=Major`; the wrapper refuses it and says to `--rebuild`.
 
 ---
 
@@ -2133,23 +2150,6 @@ Lessons from rebuilding SE/AE plugins on AE 1.7.104 (2026-10-27 to 2026-11-04); 
 - **`add_commonlibsse_plugin(... STRUCT_DEPENDENT)`** emits `versionIndependenceEx = 0x2` and `versionIndependence = 0x1` (no `StructsPost629`), which tells SKSE the plugin uses pre-1.6.629 structs. Plugins that read version-shifted structs through `RUNTIME_DATA_ACCESSOR`s pick the layout at runtime and should keep the default Independent (`0x3` / `0x1`).
 - **A post-build `copy_if_different` to `$SKYRIM_MODS_FOLDER` / `$SKYRIM_FOLDER`** in a mod's `CMakeLists.txt` writes straight into the live install. Configure with those variables unset.
 - **The 1.6.1170 `SkyrimSE.exe` is SteamStub-encrypted** (`.text` is noise), so code cannot be diffed across builds without an unpacked copy. For hardcoded-RVA plugins, map Format 2 (1.6.1170) offset -> ID -> Format 5 offset; Format 5 is `uint32 rva[id]` from file offset 96.
-
-Similarly, `audio wav-to-xwm` needs `xWMAEncode.exe`, which is not bundled. It is often simpler to call
-`xWMAEncode` directly than to go through AutoMod.
-
-**AutoMod on .NET 10 (v4, MEASURED 2026-10-05, v1.11.2 = e1c34ea, SDK 10.0.401 with no other SDK or
-runtime installed).** Upstream targets net8.0; `bash tools/automod-cli.sh --rebuild` pins SDK 10 in
-`tools/automod/global.json` and retargets `Directory.Build.props` to net10.0 (one line, a local
-patch), then builds the Cli project. It built with 0 errors (2 harmless NU1510 warnings) and on 10.0.12
-alone ran: `esp create`, `add-weapon` (dry-run and real), `add-spell/-armor/-global/-quest/-npc/-book/
--perk/-faction`, `info`, `view-record`, `list-masters`; `nif info`; `archive list/create/extract`
-(byte-exact); `mcm create/add-toggle/validate`; `papyrus status/generate/validate/download/compile/
-decompile`; `audio info/create-fuz/extract-fuz` (byte-exact). Spriggit 0.41 read the AutoMod-written
-ESP and round-tripped it byte-identical. Upstream's unit tests: 68 of 69 pass on net10.0 — and the
-same 68 of 69 on net8.0: `ResultTests.ToJson_FailedResult_ContainsSuccessFalse` fails on both (a
-failed result's JSON omits `"success": false`), so it is upstream's, not .NET 10's. Rebuilding over an
-old net8.0 build needs no clean. A net8.0 build does NOT start on a 10-only machine without
-`DOTNET_ROLL_FORWARD=Major`; the wrapper refuses it and says to `--rebuild`.
 
 ---
 
@@ -2820,8 +2820,9 @@ Recognize which vanilla records a gameplay mod overrides or depends on, and pred
   (for Skyrim.esm records, in the game's load order). `000cb40d` and `010cb40d` are two different
   records — the same local ID under a different prefix means a different master file.
 - Conventional prefixes (vanilla SSE/AE order): `00` = Skyrim.esm (never changes), `01` = Update.esm,
-  `02` = Dawnguard.esm, `03` = Hearthfires.esm, `04` = Dragonborn.esm. Load any plugin between them
-  and the DLC prefixes shift; always read the prefix from the actual load order.
+  `02` = Dawnguard.esm, `03` = Hearthfires.esm, `04` = Dragonborn.esm; Skyrim VR adds `SkyrimVR.esm` after them.
+  The engine loads the official masters first in that order; a missing DLC shifts the later prefixes, so
+  always read the prefix from the actual load order.
 - `ff` = runtime/dynamically allocated (summons, script-created items) — never document, never patch.
 - `FE` = light/ESL-flagged plugins (incl. Creation Club): the master byte becomes `FE`, followed by a
   **3-hex-digit load-order slot** (`000`–`FFF`) and a 3-hex local ID (`FE000ABC`). The slot is
@@ -2855,7 +2856,7 @@ Most-overridden vanilla perk records. FormID = **rank 1**.
 | ShieldWall / DeflectArrows / ElementalProtection / BlockRunner | 000bccae / 00058f68 / 00058f69 / 00106253 | combat overhauls, shield mods |
 | PowerBash / DeadlyBash / DisarmingBash / ShieldCharge / QuickReflexes | 00058f67 / 0005f594 / 00058f66 / 00058f6a / 000d8c33 | combat overhauls, VR mods (timed-block rewrites) |
 | Stealth00 / Backstab / DeadlyAim / AssassinsBlade | 000be126 / 00058210 / 001036f0 / 00058211 | stealth overhauls, sneak-damage rebalances |
-| MuffledMovement / SilentRoll / ShadowWarrior | 00058213 / 00105f24 / 00058214 | stealth overhauls |
+| MuffledMovement / SilentRoll / ShadowWarrior | 00058213 / 00105f23 / 00058214 | stealth overhauls |
 | Overdraw00 / CriticalShot / PowerShot / SteadyHand / Bullseye | 000babed / 00105f1c / 00058f62 / 00103ada / 00058f64 | archery overhauls, combat overhauls |
 | AugmentedFlames / AugmentedFrost / AugmentedShock | 000581e7 / 000581ea / 00058200 | magic/damage rebalance mods, perk overhauls |
 | IntenseFlames / DeepFreeze / Disintegrate | 000f392e / 000f3933 / 000f3f0e | elemental-balance mods |
@@ -2873,7 +2874,9 @@ Most-overridden vanilla perk records. FormID = **rank 1**.
 | Unbreakable / TreasureHunter / ExtraPockets / Poisoned / PerfectTouch | 00058209 / 00105f26 / 00096590 / 00105f28 / 00058205 | thief-tree overhauls, lockpick mods |
 
 **Rank note (critical for perk overhauls):** every rank of a multi-rank perk is a **separate PERK
-record with its own FormID**, EDID = base + skill-level suffix. UESP tables list rank 1 only.
+record with its own FormID**, EDID = base + skill-level suffix. UESP tables list rank 1 only, and the
+table above names it by its base name: the rank-1 EDID itself usually carries the suffix too (`Bladesman30`,
+`Barbarian00`, `SteadyHand40`; Power Bash is `PowerBashPerk`, Fortify Archery's MGEF is `AlchFortifyMarksman`).
 Verified examples: `Armsman00 000babe4`, `Armsman20 00079343`, `Armsman40 00079342`,
 `Armsman60 00079344`, `Armsman80 00079345`; `Alchemist00 000be127` → `Alchemist80 000c07cd`
 (20/40/60 = 000c07ca/cb/cc); `MageArmor30/50/70 = 000d7999 / 000d799a / 000d799b`; same pattern for
@@ -2907,7 +2910,7 @@ in `Alch*`; a "this enchantment is too strong" fix in `Ench*`; they are differen
 |---|---|---|---|
 | Damage Health | AlchDamageHealth 0003eb42 | (damage-on-contact handled per weapon ENCH) | DamageHealthConcSelf 000f4995 |
 | Damage Magicka / Stamina | AlchDamageMagicka 0003a2b6 / AlchDamageStamina 0003a2c6 | EnchMagickaDamageFFContact 0005b44f / stamina-damage variant 0005b450 | — |
-| Damage Magicka/Stamina Regen (poisons) | AlchDamageMagickaRate 00073f2b / AlchDamageStaminaRate 00073f2c | AbDamageStaminaRateVisible 0001729d / AbDamageHealRateVisible 0001729b | AbDamageHealRate 000c1e8c, AbDamageStaminaRate 000c1e8d, AbDamageMagickaRate 000a1a45 |
+| Damage Magicka/Stamina Regen (poisons) | AlchDamageMagickaRate 00073f2b / AlchDamageStaminaRate 00073f2c | — | AbDamageStaminaRateVisible 0001729d, AbDamageHealRateVisible 0001729b, AbDamageHealRate 000c1e8c, AbDamageStaminaRate 000c1e8d, AbDamageMagickaRate 000a1a45 |
 | Restore Health / Magicka / Stamina | AlchRestoreHealth 0003eb15, AlchRestoreStamina 0003eb16, AlchRestoreMagicka 0003eb17 | (heal-on-armor via EnchFortifyHealRate…) | RestoreHealthFFSelf 0001cea6, RestoreMagickaFFSelf 000f4996, RestoreStaminaFFSelf 0002f3ba |
 | **Regenerate** (Fortify * Rate) | AlchFortifyHealRate 0003eb06, AlchFortifyMagickaRate 0003eb07, AlchFortifyStaminaRate 0003eb08 | EnchFortifyHealRateConstantSelf 0007a0f8, …MagickaRate 0007a0fd, …StaminaRate 0007a105 | AbFortifyHealRate 00057b49, AbFortifyMagickaRate 0005312b (standing stones, race/ability) |
 | **Resist** Fire/Frost/Shock/Magic/Poison/Disease | AlchResistFire 0003eaea, AlchResistFrost 0003eaeb, AlchResistShock 0003eaec, AlchResistMagic 00039e51, AlchResistPoison 00090041 | EnchResistFireConstantSelf 00048c8b, …Frost 00048f45, …Shock 00049295 (EDID typo `ResistShockt`), …Magic 000b7a35, …Disease 00100e60, …Poison 000ff15e | AbResistFire 00024314, AbResistFrost 00024315, AbResistShock 00024318, AbResistMagic 00053124, AbResistPoison 000aa024, AbResistDisease 000e40d3, AbResistDamage 000cab90 |
@@ -2955,7 +2958,7 @@ conditions.
 | WICraftingSmithing / WICraftingSmithingTempering / WICraftingAlchemy / WICraftingEnchanting | 0004f680 / 0004f6fd / 0004f6e6 / 0004f6dd | crafting-menu/requisition mods |
 | WeapTypeSword / WarAxe / Dagger / Mace / Bow / Staff | 0001e711 / 0001e712 / 0001e713 / 0001e714 / 0001e715 / 0001e716 | weapon mods (adding a weapon to a skill perk's condition), perk overhauls changing weapon-type conditions |
 | WeapTypeGreatsword / Battleaxe / Warhammer / BoundArrow | 0006d931 / 0006d932 / 0006d930 / 0010d501 | as above |
-| WeapMaterialWood / Iron / Steel / Dwarven / Elven / Glass / Orcish / Ebony / Daedric | 0001e717 / 0001e718 / 0001e719 / 0001e71a / 0001e71b / 0001e71c / 0001e71d / 0001e71e / 0001e71f | material-rank mods, tempering/leveled-list mods, perk conditions |
+| WeapMaterialWood / Iron / Steel / Dwarven / Elven / Orcish / Glass / Ebony / Daedric | 0001e717 / 0001e718 / 0001e719 / 0001e71a / 0001e71b / 0001e71c / 0001e71d / 0001e71e / 0001e71f | material-rank mods, tempering/leveled-list mods, perk conditions |
 | WeapMaterialImperial / Draugr / DraugrHoned / Falmer / FalmerHoned / Silver | 000c5c00 / 000c5c01 / 000c5c02 / 000c5c03 / 000c5c04 / 0010aa1a | as above |
 | ArmorHeavy / ArmorLight | 0006bbd2 / 0006bbd3 | **the** armor-type keywords (vanilla has no `ArmorTypeHeavy`); armor mods and perks (Matching Set, Conditioning) match on these |
 | ArmorCuirass / Boots / Helmet / Gauntlets / Shield / Clothing / Jewelry | 0006c0ec / 0006c0ed / 0006c0ee / 0006c0ef / 000965b2 / 0006bbe8 / 0006bbe9 | slot-assignment mods, enchant-slot restrictions |
@@ -3094,7 +3097,7 @@ https://en.uesp.net/wiki/Skyrim:Special_Edition_Patch , https://en.uesp.net/wiki
 | Werewolf-revert / water-shader / dragon-landing / vampiric-grip crashes | Various CTDs | [Official] 1.6.87, 1.7.7, SE 1.2 | All redundant on current SE (1.6.x) |
 | Memory/stability baseline | LE 2GB limit; 4GB LAA in [Official] 1.3.10; SE is 64-bit with its own 1.6.x memory fixes | [Official] | Keep SE fully updated; on LE, LAA + SSME/SKSE memory patch were mandatory (UNSOURCED community memory, LAA mechanism page-cited) |
 | Mannequin/duplicate-reference instability; duplicate NPCs | Duplicate NPCs after load; crash on dark-brotherhood-sanctuary entry | [Official] 1.8.145, 1.9.26 | Redundant |
-| ESL record range (infrastructure, not a bug) | 1.6.1130 doubled ESL range to 4096 records | [Official] | Matters when sorting: an ESL-flagged mod's compatibility with older game versions depends on this; ESPL limits are load-order-capacity-relevant |
+| ESL record range (infrastructure, not a bug) | 1.6.1130 doubled ESL range to 4096 records (`xx000000`-`xx000FFF`). **Not on Skyrim VR**: with ESL support there, new records must stay in `xx000800`-`xx000FFF` | [Official] | Matters when sorting: an ESL-flagged mod's compatibility with older game versions depends on this; ESPL limits are load-order-capacity-relevant |
 
 *Source: https://en.uesp.net/wiki/Skyrim:Glitches , https://en.uesp.net/wiki/Skyrim:Patch ,
 https://en.uesp.net/wiki/Skyrim:Special_Edition_Patch ,
