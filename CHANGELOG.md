@@ -2,6 +2,7 @@
 
 ## v4.1.0 — unreleased
 
+- Knowledgebase: field findings from a heavy SE/AE modlist, contributed by kxgcayh (#19): vanilla combat, crafting and leveling formulas, the vanilla PERK/MGEF/KYWD records gameplay mods override, a vanilla bug catalogue for sorting, MO2 `modlist.txt` order and the usvfs 0.5.7.1 listing bug, the two winners (records by plugin order, files by mod priority), FOMOD authoring in MO2, MO2 `meta.ini` and the Nexus API, and CommonLibSSE-NG rebuild traps. Verified on flat SE/AE; the VR differences known here are marked. Review corrections: two FormIDs fixed after checking all 284 named pairs against `Skyrim.esm`, `crash-triage.py` does not read Trainwreck dumps, and VR keeps the old ESL range.
 - House Carl write tools (`housecarl_forward`, `housecarl_remove` and the others) accept the same `formids=@file` forms House Carl does: a JSON array, a plain list with one `XXXXXX:Plugin.esp` per line or comma-separated, and a House Carl result artifact (`.jsonl`, error rows skipped). The gateway freezes the file's exact bytes under `.skyguard/housecarl/inputs/` and hands House Carl that copy, so House Carl's own check that an artifact matches the current build still runs. A file it cannot use, an `@file` mixed with inline FormIDs, or a relative path gets a refusal naming the accepted forms instead of a raw JSON error. `ops=`, `assignments=` and `records=` files must still be JSON, and now say so (#20).
 
 ## v4.0.0 — 2026-11-05
