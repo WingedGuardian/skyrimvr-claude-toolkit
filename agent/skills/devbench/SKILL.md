@@ -130,6 +130,9 @@ and, on actor refs, alive/3D-loaded/attack-state/stamina (1.25-1.28); `camera` g
 tool lets the engine advance the wait (1.29, #133; the wrapper paces with shell `sleep`, not this tool);
 `record` samples poses inside a scenario run (1.30); the HMD drives VR replays (1.31).
 
+**Your own SKSE plugin can add a DevBench tool** (`RegisterTool`, MIT API glue): the recipe, threading rule and
+build gates are in `docs/skse-devbench-tools.md`.
+
 **Check `alive` first, and believe it over `ping`.** Every tool call above runs *on the game's main
 thread* and 504s after 5s if that thread is stuck — so tool calls fail in exactly the situation you
 most need diagnosed. `GET /api/health` (DevBench **1.11.0+**, answered off-thread since **1.12.0**) is

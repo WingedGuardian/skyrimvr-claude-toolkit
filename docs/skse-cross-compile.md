@@ -94,3 +94,6 @@ RUN xwin splat --output /opt/xwin
 These are consumed by `clang-cl` invocations and an xmake toolchain file that points at the splatted
 SDK. If you go this route, you're on your own for the xmake project setup — the source fork's
 Mora build isn't included here, since it's specific to that plugin's build system.
+
+Writing a plugin you will test live? [skse-devbench-tools.md](skse-devbench-tools.md) shows how it can answer an agent
+through DevBench (`RegisterTool`) and log a build fingerprint at load.
