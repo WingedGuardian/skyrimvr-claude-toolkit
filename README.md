@@ -144,7 +144,7 @@ The toolkit's tested Python range is **3.10–3.13**. The hooks run under Git Ba
    `winget install --id OpenJS.NodeJS.LTS --exact --version 24.19.0 --no-upgrade`
 
 DevBench is an optional SKSE mod installed through your mod manager. Its documented minimum is **1.11.0**;
-the newest release the docs were read against is **1.28.0** (2026-10-11, the recorded API/docs reference).
+the newest release the docs were read against is **1.32.0** (2026-10-25, the recorded API/docs reference).
 It has been read against the upstream changelog and tool descriptions, not runtime-tested here. One behaviour
 changed in 1.25.0: a Papyrus `call` with an omitted optional argument is refused (400) unless the argument is passed or
 `fillNeutral:true` is sent. The VR Address Library metadata reference is

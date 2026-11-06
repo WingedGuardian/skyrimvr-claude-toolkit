@@ -116,7 +116,8 @@ def test_skill_sentences_are_whole():
     assert "the line the refusal prints):\n\n" not in save
     devbench = _read("agent/skills/devbench/SKILL.md")
     assert "1.24.0, which is the newest release" not in devbench
-    assert "1.28.0 (2026-10-11) is the newest release" in devbench
+    assert "1.32.0 (2026-10-25) is the newest release" in devbench
+    assert "1.28.0 (2026-10-11) is the newest release" not in devbench
 
 
 def _v4_section() -> str:
@@ -130,9 +131,11 @@ def _v4_section() -> str:
 def test_the_changelog_v4_section_is_the_whole_release():
     """Review L4a M4 / L6 F2: a 201-line '## Unreleased' above '## v4.0.0' never reached the release notes, which
     release.yml extracts from the version heading to the next one."""
+    import re
     text = _read("CHANGELOG.md")
     first = text.index("\n## ")
-    assert text[first:].startswith("\n## v4.0.0"), text[first:first + 40]
+    # The first heading is a version (v4.1.0 since 4.1 opened), never an "Unreleased" section above it.
+    assert re.match(r"\n## v\d+\.\d+\.\d+ ", text[first:]), text[first:first + 40]
     notes = _v4_section()
     for entry in ("housekeep", "House Carl", "S-SAVE-OPAQUE", "Knowledgebase notes get committed"):
         assert entry in notes, entry

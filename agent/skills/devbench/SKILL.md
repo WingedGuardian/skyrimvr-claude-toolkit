@@ -77,13 +77,20 @@ quests|effects|refs`) · `papyrus` (list/describe/**call**) · `menu` (list/desc
 `game` (save/load/list) · `scenario` (timed steps with `waitFor`/`waitUntil`, not guessed sleeps) ·
 `camera` · `record`/`replay`.
 
-**Newer tools (from the DevBench 1.16–1.28 changelog, README and tool descriptions; this toolkit has not
+**Newer tools (from the DevBench 1.16–1.32 changelog, README and tool descriptions; this toolkit has not
 exercised them against a live game).** `game` gained `loadLast` (fire-and-forget; reload the latest save), `advanceTime`
 (1.17), `setTimeScale` / `getTimeScale` (1.22; scale 0.1..3.0, leased, refused with 409 while a
 recording runs) · `wait` and `sleep` (1.16; step pacing, incl. in-game hours) · `input` (1.18-1.24;
 `capabilities` / `observe` / `keyboard` / `vrTrackedSet`: **synthetic input, VR-specific and mutating**
 -- treat like `record`/`replay`) · `camera orbit` (third person only; 501 on VR) · `inspect kind=extensions`
-· `menu invoke`. **`scenario` now FAILS when an inner tool errors (since 1.16, #72)**; before that it
+· `menu invoke` · since 1.29-1.32: `game getDifficulty`/`setDifficulty` (1.29), `inspect kind=draws` (a
+frame breakdown a renderer plugin provides, 1.30), new tools `actor` (`playIdle`/`stopIdle`/`listIdles` on a
+loaded NPC), `forms` (`find`/`describe`/`plugins`/`headParts`/`asset` over loaded forms) and `capture` (screenshot
+through a capture provider; `burst`/`status`), `input vrTrackedSet reach` (all 1.31), and `game
+getAlwaysActive`/`setAlwaysActive` (1.32). **Background windows (1.32):** `inspect kind=state` now reports
+`windowFocused` and `alwaysActive` and adds a `warning` when the window is in the background with the engine's
+`bAlwaysActive` off, the case where a game on a background desktop stops advancing. DevBench's `alwaysActive`
+config key (default off) or `game setAlwaysActive` turns it on; untested here. **`scenario` now FAILS when an inner tool errors (since 1.16, #72)**; before that it
 reported success, so a scenario that used to "pass" may now fail honestly -- read the step it names.
 `devbench-bridge.exe` (stdio, shipped with DevBench) is the recommended MCP route for a session that must
 survive game restarts; **register it under a server name containing `devbench`** (any case; `dev-bench`
@@ -92,8 +99,9 @@ bridge named anything else.
 
 **Versions.** The toolkit's wrapper needs **1.11.0+** for `alive` (off-thread health since 1.12.0; older
 builds fall back to a frame diff). Everything it documents (ports, `POST /api/tool/<tool>`,
-`/api/health`, `/api/tools`, console exec/capture/read, 400/504 meanings) is unchanged in 1.28.0 per the
-changelog and a diff of the tool descriptions against 1.24.0; 1.28.0 (2026-10-11) is the newest release this was
+`/api/health`, `/api/tools`, console exec/capture/read, 400/504 meanings) is unchanged in 1.32.0 per the
+changelog and a diff of the README tool table against 1.28.0 (`console` and `papyrus` identical, `inspect
+kind=health` unchanged, `kind=state` only gains fields); 1.32.0 (2026-10-25) is the newest release this was
 read against; the one behaviour that did change is the Papyrus `call` rule below. **Keep the VR Address Library
 current before updating DevBench:** DevBench 1.19+ is built on CommonLibSSE-NG 8.3.0 and needs a current
 Address Library. The newest VR Address Library seen when this was written is **0.279.0**;
@@ -118,7 +126,9 @@ and a 504 now says whether the call was already dispatched (it may still run).
 with a `generation` and `state` and waits up to `waitMs` (default 2000); a request still ramping is an
 answer, not a 504, unless `requireReached:true` (1.26+); `inspect` gained `lights`, per-hand `hands` data
 and, on actor refs, alive/3D-loaded/attack-state/stamina (1.25-1.28); `camera` gained `frame` and
-`camAngles` (1.25); synthetic keys carry an empty user event so menus receive them (1.28, #127).
+`camAngles` (1.25); synthetic keys carry an empty user event so menus receive them (1.28, #127); the `wait`
+tool lets the engine advance the wait (1.29, #133; the wrapper paces with shell `sleep`, not this tool);
+`record` samples poses inside a scenario run (1.30); the HMD drives VR replays (1.31).
 
 **Check `alive` first, and believe it over `ping`.** Every tool call above runs *on the game's main
 thread* and 504s after 5s if that thread is stuck — so tool calls fail in exactly the situation you
